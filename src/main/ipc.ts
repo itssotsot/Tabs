@@ -143,6 +143,9 @@ export function registerIpc(): void {
 
   // Sharing
   onChrome(IPC.shareOpenPicker, (c) => void c.openSendPickerForTab())
+  ipcMain.on(IPC.pageAdblockEnabled, (e) => {
+    e.returnValue = store.settings.adblock
+  })
   ipcMain.on(IPC.pageShare, (e) => {
     const c = controllerFor(e.sender)
     const tab = c?.tabFor(e.sender)

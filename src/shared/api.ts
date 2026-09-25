@@ -70,6 +70,7 @@ export const IPC = {
 
   // web pages -> main
   pageShare: 'page:share',
+  pageAdblockEnabled: 'page:adblock-enabled',
 
   // internal pages -> main
   internalHistory: 'internal:history',

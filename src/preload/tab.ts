@@ -3,6 +3,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type InternalAPI } from '@shared/api'
 import { INTERNAL_SCHEME } from '@shared/url'
+import { installYouTubeAdBlocking } from './youtube'
 
 if (location.protocol === `${INTERNAL_SCHEME}:`) {
   const api: InternalAPI = {
@@ -23,6 +24,9 @@ if (location.protocol === `${INTERNAL_SCHEME}:`) {
 }
 
 if (/(^|\.)youtube\.com$/.test(location.hostname) && window.top === window) {
+  // Synchronous on purpose: this has to be in place before YouTube's own scripts run.
+  if (ipcRenderer.sendSync(IPC.pageAdblockEnabled) === true) installYouTubeAdBlocking()
+
   const BUTTON_ID = 'browserr-send-button'
   const SVG_NS = 'http://www.w3.org/2000/svg'
 

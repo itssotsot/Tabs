@@ -11,7 +11,7 @@ const target = targets.find((t) => t.url.includes(match))
 if (!target) throw new Error(`No target matching ${match}`)
 const ws = new WebSocket(target.webSocketDebuggerUrl)
 await new Promise((r) => ws.addEventListener('open', r))
-ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }))
+ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true, userGesture: true } }))
 ws.addEventListener('message', (e) => {
   const msg = JSON.parse(e.data)
   if (msg.id !== 1) return
