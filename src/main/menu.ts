@@ -337,7 +337,7 @@ function truncate(text: string, max: number): string {
 // ---- right-click on a tab ----
 
 export function showTabContextMenu(c: BrowserWindowController, tab: Tab): void {
-  const muted = tab.wc.isAudioMuted()
+  const muted = tab.muted
   Menu.buildFromTemplate(
     compact([
       { label: 'New Tab to the Right', click: () => c.createTab(undefined, { index: c.indexOf(tab) + 1 }) },

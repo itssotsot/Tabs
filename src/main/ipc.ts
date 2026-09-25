@@ -9,6 +9,7 @@ import { webSession } from './env'
 import { showAppMenu, showBookmarkContextMenu, showSiteInfoMenu, showTabContextMenu } from './menu'
 import { showNotification } from './notifications'
 import { omniboxSuggestions } from './omnibox'
+import { warmUp } from './predictor'
 import { store } from './store'
 import { BrowserWindowController, controllerFor, focusedController } from './window'
 
@@ -54,7 +55,7 @@ function handleInternal(channel: string, fn: (...args: unknown[]) => unknown): v
 }
 
 const ENGINES: SearchEngine[] = ['google', 'duckduckgo', 'bing', 'brave']
-const BOOLEAN_SETTINGS = ['adblock', 'notifications', 'showBookmarksBar', 'restoreSession'] as const
+const BOOLEAN_SETTINGS = ['adblock', 'notifications', 'showBookmarksBar', 'restoreSession', 'memorySaver'] as const
 
 function sanitizeSettings(patch: unknown): Partial<Settings> {
   const out: Partial<Settings> = {}
@@ -115,6 +116,9 @@ export function registerIpc(): void {
   onChrome(IPC.omniboxShow, (c, items, selected, rect) => {
     if (Array.isArray(items) && isNumber(selected) && rect && typeof rect === 'object') {
       c.showSuggestions(items as Suggestion[], selected, rect as Rect)
+      // Start connecting to whatever Enter would open, like Chrome's omnibox does.
+      const target = (items as Suggestion[])[selected]?.url
+      if (isWebUrl(target)) warmUp(webSession(), target, 2)
     }
   })
   onChrome(IPC.omniboxHide, (c) => c.hideSuggestions())

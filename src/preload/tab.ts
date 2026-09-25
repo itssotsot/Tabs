@@ -3,7 +3,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type InternalAPI } from '@shared/api'
 import { INTERNAL_SCHEME } from '@shared/url'
+import { installCosmeticFiltering } from './cosmetics'
 import { installYouTubeAdBlocking } from './youtube'
+
+if (/^https?:$/.test(location.protocol)) installCosmeticFiltering()
 
 if (location.protocol === `${INTERNAL_SCHEME}:`) {
   const api: InternalAPI = {

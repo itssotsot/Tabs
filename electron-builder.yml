@@ -3,9 +3,15 @@ productName: Browserr
 directories:
   buildResources: build
   output: dist
+# castLabs' Electron build, which includes Widevine DRM.
+electronDownload:
+  mirror: https://github.com/castlabs/electron-releases/releases/download/
+afterPack: build/after-pack.cjs
+afterSign: build/after-sign.cjs
 files:
   - out/**
   - package.json
+  - '!build/**'
 asarUnpack:
   - resources/**
 protocols:

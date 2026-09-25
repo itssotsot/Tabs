@@ -24,6 +24,8 @@ const READ_META = `(() => {
 const ISOLATED_WORLD_ID = 1001
 
 async function readMeta(tab: Tab): Promise<PageMeta | null> {
+  // A sleeping tab has no page to read; don't wake it just for this.
+  if (!tab.loaded) return null
   try {
     return (await tab.wc.executeJavaScriptInIsolatedWorld(ISOLATED_WORLD_ID, [{ code: READ_META }])) as PageMeta
   } catch {

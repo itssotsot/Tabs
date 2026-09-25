@@ -40,7 +40,15 @@ const HISTORY_LIMIT = 10_000
 export interface SavedTab {
   url: string
   pinned: boolean
+  title?: string
+  favicon?: string | null
+  /** Back/forward list (without page state), so history survives a restart. */
+  entries?: { url: string; title: string }[]
+  index?: number
 }
+
+/** Page host -> origins its pages load from -> how often. Used to preconnect. */
+export type PredictorData = Record<string, { seen: number; origins: Record<string, number> }>
 
 export interface SavedWindow {
   bounds: { x: number; y: number; width: number; height: number } | null
@@ -56,7 +64,8 @@ export const DEFAULT_SETTINGS: Settings = {
   adblock: true,
   notifications: true,
   showBookmarksBar: true,
-  restoreSession: true
+  restoreSession: true,
+  memorySaver: true
 }
 
 class Stores {
@@ -65,6 +74,7 @@ class Stores {
   private settingsFile!: JsonFile<Settings>
   private sessionFile!: JsonFile<{ windows: SavedWindow[] }>
   private permissionsFile!: JsonFile<{ sites: Record<string, Record<string, PermissionDecision>> }>
+  private predictorFile!: JsonFile<{ hosts: PredictorData }>
 
   /** Must run after `app.whenReady()` so userData is final. */
   init(): void {
@@ -73,10 +83,11 @@ class Stores {
     this.settingsFile = new JsonFile('settings', DEFAULT_SETTINGS)
     this.sessionFile = new JsonFile('session', { windows: [] })
     this.permissionsFile = new JsonFile('permissions', { sites: {} })
+    this.predictorFile = new JsonFile('predictor', { hosts: {} })
   }
 
   flushAll(): void {
-    for (const f of [this.history, this.bookmarksFile, this.settingsFile, this.sessionFile, this.permissionsFile]) {
+    for (const f of [this.history, this.bookmarksFile, this.settingsFile, this.sessionFile, this.permissionsFile, this.predictorFile]) {
       f.flush()
     }
   }
@@ -179,6 +190,8 @@ class Stores {
   clearHistory(): void {
     this.history.data.entries = {}
     this.history.save()
+    this.predictorFile.data.hosts = {}
+    this.predictorFile.save()
   }
 
   // Bookmarks
@@ -229,6 +242,16 @@ class Stores {
   saveSession(windows: SavedWindow[]): void {
     this.sessionFile.data.windows = windows
     this.sessionFile.save()
+  }
+
+  // Loading predictor
+
+  get predictor(): PredictorData {
+    return this.predictorFile.data.hosts
+  }
+
+  savePredictor(): void {
+    this.predictorFile.save()
   }
 
   // Site permissions

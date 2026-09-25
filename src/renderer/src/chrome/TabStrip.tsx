@@ -27,8 +27,8 @@ function TabItem({ tab, index, active, dragging, onDragStart, onDrop }: TabItemP
     <div
       role="tab"
       aria-selected={active}
-      title={tab.url ? `${tab.title}\n${tab.url}` : tab.title}
-      className={cx('tab', active && 'active', tab.pinned && 'pinned', dragging && 'dragging')}
+      title={tab.url ? `${tab.title}\n${tab.url}${tab.sleeping ? '\nSleeping to save memory' : ''}` : tab.title}
+      className={cx('tab', active && 'active', tab.pinned && 'pinned', dragging && 'dragging', tab.sleeping && 'sleeping')}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = 'move'

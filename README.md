@@ -37,6 +37,28 @@ Firebase console → Authentication → Get started → Sign-in method → Googl
 
 Sign-in opens in your normal browser (Google blocks OAuth inside embedded browsers) and hands the credential back to the app over `localhost`, which Firebase authorizes by default.
 
+## Streaming DRM (Netflix, Spotify, Disney+)
+
+Browserr uses [castLabs' Electron build](https://github.com/castlabs/electron-releases), which includes Widevine. It works in development as is. Streaming services only license Widevine to apps with a **production VMP signature**, which castLabs issues for free:
+
+```bash
+python3 -m pip install --upgrade castlabs-evs
+python3 -m castlabs_evs.account signup    # once
+```
+
+After that, `npm run dist:mac` / `npm run dist:win` sign the app automatically (`build/vmp-sign.cjs`). Without an account the build prints a warning and skips signing.
+
+## Performance
+
+On top of Chromium, Browserr does what Chrome adds itself:
+
+- **Lazy tab restore**: only the visible tab loads at startup; the rest load (with their back/forward history) when opened.
+- **Memory Saver**: background tabs are paused after 5 minutes and unloaded after 30 (5 when memory is low), then restored with history and scroll position. Tabs playing audio, pinned tabs, tabs with open popups, and sites allowed to send notifications stay awake. Toggle in Settings.
+- **Loading predictor**: learns which servers each site uses and connects to them as soon as you start going there, or while the address bar highlights it.
+- **Ad and tracker blocking**, including YouTube video ads.
+
+Electron itself doesn't support Chromium's back/forward cache (`BackForwardCacheDisabledForDelegate`), so Back/Forward reload the page.
+
 ## Using it
 
 | Action | Shortcut |
@@ -62,6 +84,8 @@ Data model: `users/{uid}`, `usernames/{name}`, `friendships/{uidA_uidB}`, `share
 npm run typecheck
 npm run test:rules   # security-rules tests against the Firestore emulator (needs Java)
 ```
+
+`BROWSERR_FAST_MEMORY_SAVER=1 npm run dev` shrinks the Memory Saver timers (10s pause, 20s unload) for testing.
 
 During development you can drive the app over the DevTools protocol:
 

@@ -3,19 +3,30 @@ import { IPC } from '@shared/api'
 import { SUGGESTION_PADDING, SUGGESTION_ROW_HEIGHT } from '@shared/constants'
 import type { ChromeCommand, Insets, OverlayState, Rect, ShareDraft, Suggestion, WindowState } from '@shared/types'
 import { NEW_TAB_URL } from '@shared/url'
-import { chromePreload, profile, uiUrl } from './env'
+import { chromePreload, profile, uiUrl, webSession } from './env'
 import { showPageContextMenu } from './menu'
+import { warmUp } from './predictor'
 import { draftFromTab } from './share'
-import { store, type SavedWindow } from './store'
-import { Tab, type TabHost } from './tab'
+import { store, type SavedTab, type SavedWindow } from './store'
+import { Tab, type TabHost, type TabSnapshot } from './tab'
 
 const isMac = process.platform === 'darwin'
 const CHROME_BG = '#161618'
 
 /** Every webContents we own (UI, overlay, tabs) -> its window controller. */
 const owners = new Map<number, BrowserWindowController>()
-/** Recently closed tabs, most recent last. Shared across windows like Chrome. */
-const closedTabs: { url: string }[] = []
+/** Recently closed tabs (with their history), most recent last. Shared across windows like Chrome. */
+const closedTabs: SavedTab[] = []
+
+function snapshotOf(saved: SavedTab): TabSnapshot {
+  return {
+    url: saved.url,
+    title: saved.title ?? '',
+    favicon: saved.favicon ?? null,
+    entries: saved.entries?.map((e) => ({ url: e.url, title: e.title })),
+    index: saved.index
+  }
+}
 
 let lastFocused: BrowserWindowController | null = null
 let sessionTimer: NodeJS.Timeout | null = null
@@ -119,11 +130,13 @@ export class BrowserWindowController implements TabHost {
     this.overlay.webContents.loadURL(uiUrl('overlay'))
 
     if (saved?.tabs.length) {
-      saved.tabs.forEach((t, i) => {
-        const tab = this.createTab(t.url, { active: i === saved.activeIndex })
+      // Only the tab you'll see loads now; the rest load when you open them.
+      for (const t of saved.tabs) {
+        const tab = new Tab(this, t.url, { lazy: true, snapshot: snapshotOf(t) })
         tab.pinned = t.pinned
-      })
-      if (!this.active) this.activate(this.tabs[0])
+        this.tabs.push(tab)
+      }
+      this.activate(this.tabs[Math.min(saved.activeIndex, this.tabs.length - 1)] ?? this.tabs[0])
     } else if (options.urls?.length) {
       options.urls.forEach((url, i) => this.createTab(url, { active: i === 0 }))
     } else {
@@ -189,7 +202,19 @@ export class BrowserWindowController implements TabHost {
   }
 
   tabFor(wc: WebContents): Tab | undefined {
-    return this.tabs.find((t) => t.wc === wc)
+    return this.tabs.find((t) => t.liveWc === wc)
+  }
+
+  get allTabs(): readonly Tab[] {
+    return this.tabs
+  }
+
+  onWebContentsCreated(_tab: Tab, wc: WebContents): void {
+    owners.set(wc.id, this)
+  }
+
+  onWebContentsDestroyed(_tab: Tab, wc: WebContents): void {
+    owners.delete(wc.id)
   }
 
   get activeTab(): Tab | null {
@@ -200,9 +225,7 @@ export class BrowserWindowController implements TabHost {
     return {
       bounds: this.win.getNormalBounds(),
       maximized: this.win.isMaximized(),
-      tabs: this.tabs
-        .filter((t) => !t.url.startsWith(NEW_TAB_URL) || t.pinned)
-        .map((t) => ({ url: t.url, pinned: t.pinned })),
+      tabs: this.tabs.filter((t) => !t.url.startsWith(NEW_TAB_URL) || t.pinned).map((t) => t.toSaved()),
       activeIndex: Math.max(0, this.active ? this.tabs.filter((t) => !t.url.startsWith(NEW_TAB_URL) || t.pinned).indexOf(this.active) : 0)
     }
   }
@@ -267,13 +290,19 @@ export class BrowserWindowController implements TabHost {
 
   // ---- tabs ----
 
-  createTab(url: string = NEW_TAB_URL, options: { active?: boolean; index?: number } = {}): Tab {
-    const tab = new Tab(this, url)
-    owners.set(tab.wc.id, this)
+  createTab(
+    url: string = NEW_TAB_URL,
+    options: { active?: boolean; index?: number; lazy?: boolean; snapshot?: TabSnapshot } = {}
+  ): Tab {
+    const tab = new Tab(this, url, { lazy: options.lazy || !!options.snapshot, snapshot: options.snapshot })
     const index = options.index ?? this.tabs.length
     this.tabs.splice(Math.min(index, this.tabs.length), 0, tab)
     if (options.active !== false || !this.active) this.activate(tab)
-    if (options.active !== false && url === NEW_TAB_URL) this.focusOmnibox()
+    if (options.active !== false && url === NEW_TAB_URL) {
+      this.focusOmnibox()
+      // A new tab usually leads to one of your regular sites; get their connections ready.
+      for (const site of store.topSites(4)) warmUp(webSession(), site.url)
+    }
     this.scheduleState()
     return tab
   }
@@ -287,7 +316,10 @@ export class BrowserWindowController implements TabHost {
     if (this.active) {
       this.active.wc.stopFindInPage('clearSelection')
       this.win.contentView.removeChildView(this.active.view)
+      this.active.lastActiveAt = Date.now()
     }
+    tab.lastActiveAt = Date.now()
+    void tab.thaw()
     this.active = tab
     // Index 0 keeps the tab under the overlay when both are attached.
     this.win.contentView.addChildView(tab.view, 0)
@@ -306,11 +338,10 @@ export class BrowserWindowController implements TabHost {
     const index = this.tabs.indexOf(tab)
     if (index === -1) return
     if (!tab.url.startsWith(NEW_TAB_URL)) {
-      closedTabs.push({ url: tab.url })
+      closedTabs.push(tab.toSaved())
       if (closedTabs.length > 25) closedTabs.shift()
     }
     this.tabs.splice(index, 1)
-    owners.delete(tab.wc.id)
     if (this.fullscreenTab === tab) this.onTabFullscreen(tab, false)
     if (this.active === tab) {
       this.win.contentView.removeChildView(tab.view)
@@ -345,11 +376,11 @@ export class BrowserWindowController implements TabHost {
 
   reopenClosedTab(): void {
     const last = closedTabs.pop()
-    if (last) this.createTab(last.url)
+    if (last) this.createTab(last.url, { snapshot: snapshotOf(last) })
   }
 
   duplicateTab(tab: Tab): void {
-    this.createTab(tab.url, { index: this.tabs.indexOf(tab) + 1 })
+    this.createTab(tab.url, { index: this.tabs.indexOf(tab) + 1, snapshot: snapshotOf(tab.toSaved()) })
   }
 
   moveTab(id: number, toIndex: number): void {

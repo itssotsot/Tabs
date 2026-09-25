@@ -57,6 +57,12 @@ export function SettingsPage(): ReactNode {
           onChange={(v) => void update({ restoreSession: v })}
         />
         <Toggle
+          label="Memory Saver"
+          detail="Pause tabs you haven't used for 5 minutes and unload them after 30. They come back when you open them. Tabs playing audio, pinned tabs and sites that send you notifications stay awake."
+          checked={settings.memorySaver}
+          onChange={(v) => void update({ memorySaver: v })}
+        />
+        <Toggle
           label="Show bookmarks bar"
           checked={settings.showBookmarksBar}
           onChange={(v) => void update({ showBookmarksBar: v })}

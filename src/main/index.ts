@@ -1,11 +1,13 @@
-import { app, BrowserWindow, type WebContents } from 'electron'
+import { app, BrowserWindow, components, type WebContents } from 'electron'
 import { setAdblockEnabled } from './adblock'
 import { broadcast } from './broadcast'
 import { setupDownloads } from './downloads'
 import { profile, registerInternalProtocol, registerSchemes, webSession } from './env'
 import { registerIpc } from './ipc'
 import { buildAppMenu } from './menu'
+import { startMemorySaver } from './memory'
 import { setupPermissions } from './permissions'
+import { setupPredictor } from './predictor'
 import { store } from './store'
 import { BrowserWindowController, controllerFor, focusedController, freezeSession } from './window'
 import { IPC } from '@shared/api'
@@ -95,7 +97,18 @@ function openInitialWindows(): void {
   }
 }
 
-app.whenReady().then(() => {
+/**
+ * Widevine (DRM for Netflix, Spotify, Disney+ and so on) comes from castLabs' Electron
+ * build and is downloaded by the component updater on first launch. Give it a moment
+ * so DRM sites work immediately, but never hold up the window for long.
+ */
+async function waitForWidevine(): Promise<void> {
+  const ready = components.whenReady().catch((err) => console.error('[widevine] unavailable', err))
+  await Promise.race([ready, new Promise((resolve) => setTimeout(resolve, 1500))])
+}
+
+app.whenReady().then(async () => {
+  await waitForWidevine()
   store.init()
 
   const userAgent = chromeUserAgent()
@@ -107,6 +120,8 @@ app.whenReady().then(() => {
   setupPermissions(ses, windowFor)
   setupDownloads(ses, (list) => broadcast(IPC.downloadsChanged, list))
   void setAdblockEnabled(ses, store.settings.adblock)
+  setupPredictor(ses)
+  startMemorySaver()
 
   registerIpc()
   buildAppMenu()

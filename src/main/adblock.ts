@@ -57,11 +57,25 @@ function injectScriptletsOncePerPage(b: ElectronBlocker): void {
   }
 }
 
+/** Our tab preload does the library's job (see src/preload/cosmetics.ts); drop its own copy. */
+function removeLibraryPreload(ses: Session): void {
+  for (const script of ses.getPreloadScripts()) {
+    if (script.filePath.includes('adblocker-electron-preload')) ses.unregisterPreloadScript(script.id)
+  }
+}
+
 export async function setAdblockEnabled(ses: Session, enabled: boolean): Promise<void> {
   if (enabled) {
     const b = await load()
-    if (b && !b.isBlockingEnabled(ses)) b.enableBlockingInSession(ses)
+    if (b && !b.isBlockingEnabled(ses)) {
+      b.enableBlockingInSession(ses)
+      removeLibraryPreload(ses)
+    }
   } else if (blocker?.isBlockingEnabled(ses)) {
-    blocker.disableBlockingInSession(ses)
+    try {
+      blocker.disableBlockingInSession(ses)
+    } catch {
+      // It tries to unregister the preload we already removed.
+    }
   }
 }

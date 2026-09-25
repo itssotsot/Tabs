@@ -13,6 +13,8 @@ export interface TabState {
   zoomPercent: number
   secure: boolean
   internal: boolean
+  /** Unloaded to save memory (or not opened yet since restore); loads when selected. */
+  sleeping: boolean
 }
 
 export interface WindowState {
@@ -109,6 +111,8 @@ export interface Settings {
   notifications: boolean
   showBookmarksBar: boolean
   restoreSession: boolean
+  /** Unload tabs you haven't used in a while. */
+  memorySaver: boolean
 }
 
 export interface GoogleCredential {

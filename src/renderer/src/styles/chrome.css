@@ -1348,3 +1348,8 @@ body.overlay-body {
   color: white;
   background: linear-gradient(135deg, #f97316, #ec4899);
 }
+
+.tab.sleeping .favicon {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}

@@ -1,13 +1,25 @@
-import { dialog, WebContentsView, type BrowserWindow, type ContextMenuParams, type Input, type Result } from 'electron'
+import {
+  dialog,
+  WebContentsView,
+  type BrowserWindow,
+  type ContextMenuParams,
+  type Input,
+  type NavigationEntry,
+  type Result,
+  type WebContents
+} from 'electron'
 import type { TabState } from '@shared/types'
 import { INTERNAL_SCHEME, isInternalUrl, NEW_TAB_URL, prettyUrl } from '@shared/url'
 import { tabPreload, webSession } from './env'
-import { store } from './store'
+import { onNavigationStart } from './predictor'
+import { store, type SavedTab } from './store'
 
 /** What a tab needs from the window that owns it. */
 export interface TabHost {
   readonly win: BrowserWindow
   onTabUpdated(tab: Tab): void
+  onWebContentsCreated(tab: Tab, wc: WebContents): void
+  onWebContentsDestroyed(tab: Tab, wc: WebContents): void
   openTab(url: string, options: { active: boolean; opener: Tab }): void
   onTabFullscreen(tab: Tab, fullscreen: boolean): void
   onFindResult(tab: Tab, result: Result): void
@@ -15,28 +27,134 @@ export interface TabHost {
   handleInput(input: Input): boolean
 }
 
+/** Everything needed to bring back a tab whose page isn't loaded. */
+export interface TabSnapshot {
+  url: string
+  title: string
+  favicon: string | null
+  entries?: NavigationEntry[]
+  index?: number
+}
+
 const ERROR_HOST = 'error'
 const ERR_ABORTED = -3
 const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5]
+/** Back/forward entries kept when a tab is unloaded or saved. */
+const MAX_HISTORY_ENTRIES = 50
 
 let nextTabId = 1
 
+/** Keeps at most `max` entries around `index`, returning the new list and index. */
+function trimHistory(entries: NavigationEntry[], index: number, max: number): { entries: NavigationEntry[]; index: number } {
+  if (entries.length <= max) return { entries, index }
+  const start = Math.max(0, Math.min(index - Math.floor(max / 2), entries.length - max))
+  return { entries: entries.slice(start, start + max), index: index - start }
+}
+
+/**
+ * A browser tab. Its page (a WebContentsView) is created on demand, so restored
+ * tabs cost nothing until opened and idle tabs can be unloaded to free memory.
+ */
 export class Tab {
   readonly id = nextTabId++
-  readonly view: WebContentsView
   pinned = false
+  /** When the user last looked at this tab. */
+  lastActiveAt = Date.now()
+  private viewInstance: WebContentsView | null = null
+  /** Present while the page isn't loaded (lazy restore or unloaded to save memory). */
+  private snapshot: TabSnapshot | null = null
   private favicon: string | null = null
   private loading = false
+  /** Paused via the page lifecycle API: no scripts or timers run until thawed. */
+  private frozen = false
   /** Set while showing our error page, so the address bar keeps the URL that failed. */
   private failedUrl: string | null = null
   private requestedUrl: string
 
   constructor(
     private readonly host: TabHost,
-    url: string
+    url: string,
+    options: { lazy?: boolean; snapshot?: TabSnapshot } = {}
   ) {
     this.requestedUrl = url
-    this.view = new WebContentsView({
+    if (options.lazy) {
+      this.snapshot = options.snapshot ?? { url, title: '', favicon: null }
+    } else {
+      this.load(url)
+    }
+  }
+
+  /** Whether the page currently exists (false for sleeping tabs). */
+  get loaded(): boolean {
+    return this.viewInstance !== null
+  }
+
+  /** The tab's view, creating and loading the page if it's asleep. */
+  get view(): WebContentsView {
+    return this.viewInstance ?? this.wake()
+  }
+
+  get wc(): WebContents {
+    return this.view.webContents
+  }
+
+  /** The page's webContents only if it's already loaded. Never wakes the tab. */
+  get liveWc(): WebContents | null {
+    return this.viewInstance?.webContents ?? null
+  }
+
+  /** The URL to restore, bookmark, or share (never the error page itself). */
+  get url(): string {
+    if (this.failedUrl) return this.failedUrl
+    if (this.snapshot) return this.snapshot.url
+    return this.liveWc?.getURL() || this.requestedUrl
+  }
+
+  get isInternal(): boolean {
+    return !this.failedUrl && isInternalUrl(this.url)
+  }
+
+  get title(): string {
+    return this.snapshot ? this.snapshot.title : (this.liveWc?.getTitle() ?? '')
+  }
+
+  get muted(): boolean {
+    return this.liveWc?.isAudioMuted() ?? false
+  }
+
+  get audible(): boolean {
+    return this.liveWc?.isCurrentlyAudible() ?? false
+  }
+
+  get state(): TabState {
+    const url = this.url
+    const isNewTab = url.startsWith(NEW_TAB_URL)
+    const wc = this.liveWc
+    const rawTitle = this.title
+    const title = !rawTitle || rawTitle === url ? (isNewTab ? 'New Tab' : prettyUrl(url)) : rawTitle
+    const snap = this.snapshot
+    return {
+      id: this.id,
+      url: isNewTab ? '' : url,
+      title,
+      favicon: this.isInternal ? null : (snap ? snap.favicon : this.favicon),
+      loading: this.loading,
+      canGoBack: wc ? wc.navigationHistory.canGoBack() : (snap?.index ?? 0) > 0,
+      canGoForward: wc ? wc.navigationHistory.canGoForward() : (snap?.index ?? 0) < (snap?.entries?.length ?? 1) - 1,
+      audible: this.audible,
+      muted: this.muted,
+      pinned: this.pinned,
+      zoomPercent: wc ? Math.round(wc.getZoomFactor() * 100) : 100,
+      secure: url.startsWith('https:') || this.isInternal,
+      internal: this.isInternal,
+      sleeping: !wc
+    }
+  }
+
+  /** Creates the page and brings back whatever it was showing. */
+  wake(): WebContentsView {
+    if (this.viewInstance) return this.viewInstance
+    const view = new WebContentsView({
       webPreferences: {
         session: webSession(),
         preload: tabPreload,
@@ -47,62 +165,107 @@ export class Tab {
         scrollBounce: true
       }
     })
-    this.view.setBackgroundColor('#ffffff')
+    view.setBackgroundColor('#ffffff')
     // Each pending executeJavaScript (ours and the ad blocker's) briefly adds a load listener.
-    this.wc.setMaxListeners(50)
-    this.wire()
-    this.load(url)
-  }
+    view.webContents.setMaxListeners(50)
+    this.viewInstance = view
+    this.wire(view.webContents)
+    this.host.onWebContentsCreated(this, view.webContents)
 
-  get wc(): Electron.WebContents {
-    return this.view.webContents
-  }
-
-  /** The URL to restore, bookmark, or share (never the error page itself). */
-  get url(): string {
-    return this.failedUrl ?? (this.wc.getURL() || this.requestedUrl)
-  }
-
-  get isInternal(): boolean {
-    return !this.failedUrl && isInternalUrl(this.url)
-  }
-
-  get title(): string {
-    return this.wc.getTitle()
-  }
-
-  get state(): TabState {
-    const url = this.url
-    const isNewTab = url.startsWith(NEW_TAB_URL)
-    const history = this.wc.navigationHistory
-    const rawTitle = this.wc.getTitle()
-    const title = !rawTitle || rawTitle === this.wc.getURL() ? (isNewTab ? 'New Tab' : prettyUrl(url)) : rawTitle
-    return {
-      id: this.id,
-      url: isNewTab ? '' : url,
-      title,
-      favicon: this.isInternal ? null : this.favicon,
-      loading: this.loading,
-      canGoBack: history.canGoBack(),
-      canGoForward: history.canGoForward(),
-      audible: this.wc.isCurrentlyAudible(),
-      muted: this.wc.isAudioMuted(),
-      pinned: this.pinned,
-      zoomPercent: Math.round(this.wc.getZoomFactor() * 100),
-      secure: url.startsWith('https:') || this.isInternal,
-      internal: this.isInternal
+    const snap = this.snapshot
+    this.snapshot = null
+    if (snap) {
+      this.favicon = snap.favicon
+      if (snap.entries?.length) {
+        // Restores the whole back/forward list, including scroll position and form contents.
+        view.webContents.navigationHistory
+          .restore({ entries: snap.entries, index: snap.index })
+          .catch(() => this.load(snap.url))
+      } else {
+        this.load(snap.url)
+      }
     }
+    return view
+  }
+
+  get isFrozen(): boolean {
+    return this.frozen
+  }
+
+  /** Pauses the page (like Chrome's tab freezing). Uses the DevTools protocol, so skipped while DevTools is open. */
+  async freeze(): Promise<boolean> {
+    const wc = this.liveWc
+    if (!wc || this.frozen || wc.isDevToolsOpened()) return false
+    try {
+      if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
+      await wc.debugger.sendCommand('Page.setWebLifecycleState', { state: 'frozen' })
+      this.frozen = true
+      return true
+    } catch {
+      if (wc.debugger.isAttached()) wc.debugger.detach()
+      return false
+    }
+  }
+
+  /** Resumes a frozen page. */
+  async thaw(): Promise<void> {
+    const wc = this.liveWc
+    if (!wc || !this.frozen) return
+    this.frozen = false
+    try {
+      await wc.debugger.sendCommand('Page.setWebLifecycleState', { state: 'active' })
+    } catch {
+      // Page navigated or was reloaded; it's active anyway.
+    } finally {
+      if (wc.debugger.isAttached()) wc.debugger.detach()
+    }
+  }
+
+  /** Unloads the page to free memory; it comes back when the tab is opened. */
+  sleep(): boolean {
+    const wc = this.liveWc
+    if (!wc || wc.isDestroyed()) return false
+    this.snapshot = this.captureSnapshot(true)
+    this.host.onWebContentsDestroyed(this, wc)
+    this.viewInstance = null
+    this.loading = false
+    this.failedUrl = null
+    this.frozen = false
+    wc.close()
+    this.host.onTabUpdated(this)
+    return true
+  }
+
+  private captureSnapshot(withPageState: boolean): TabSnapshot {
+    if (this.snapshot) return this.snapshot
+    const wc = this.liveWc
+    const base = { url: this.url, title: this.state.title, favicon: this.favicon }
+    // The error page isn't worth restoring; retry the real URL instead.
+    if (!wc || this.failedUrl) return base
+    const history = wc.navigationHistory
+    const all = history.getAllEntries().map((e) => (withPageState ? e : { url: e.url, title: e.title }))
+    const { entries, index } = trimHistory(all, history.getActiveIndex(), MAX_HISTORY_ENTRIES)
+    return entries.length ? { ...base, entries, index } : base
+  }
+
+  /** What the session file keeps for this tab (history without page state, to stay small). */
+  toSaved(): SavedTab {
+    const snap = this.captureSnapshot(false)
+    const entries = snap.entries?.map((e) => ({ url: e.url, title: e.title }))
+    return { url: snap.url, pinned: this.pinned, title: snap.title, favicon: snap.favicon, entries, index: snap.index }
   }
 
   load(url: string): void {
     this.requestedUrl = url
     this.failedUrl = null
+    this.snapshot = null
     this.wc.loadURL(url).catch(() => {
       // Failures are reported through did-fail-load.
     })
   }
 
   reload(ignoreCache = false): void {
+    if (!this.loaded) return void this.wake()
     if (this.failedUrl) return this.load(this.failedUrl)
     if (ignoreCache) this.wc.reloadIgnoringCache()
     else this.wc.reload()
@@ -126,7 +289,9 @@ export class Tab {
   }
 
   toggleMute(): void {
-    this.wc.setAudioMuted(!this.wc.isAudioMuted())
+    const wc = this.liveWc
+    if (!wc) return
+    wc.setAudioMuted(!wc.isAudioMuted())
     this.host.onTabUpdated(this)
   }
 
@@ -136,7 +301,11 @@ export class Tab {
   }
 
   destroy(): void {
-    if (!this.wc.isDestroyed()) this.wc.close()
+    const wc = this.liveWc
+    this.viewInstance = null
+    if (!wc) return
+    this.host.onWebContentsDestroyed(this, wc)
+    if (!wc.isDestroyed()) wc.close()
   }
 
   private showError(url: string, code: string, description: string): void {
@@ -146,8 +315,7 @@ export class Tab {
     this.host.onTabUpdated(this)
   }
 
-  private wire(): void {
-    const wc = this.wc
+  private wire(wc: WebContents): void {
     const update = (): void => this.host.onTabUpdated(this)
 
     wc.on('did-start-loading', () => {
@@ -157,6 +325,9 @@ export class Tab {
     wc.on('did-stop-loading', () => {
       this.loading = false
       update()
+    })
+    wc.on('did-start-navigation', (details) => {
+      if (details.isMainFrame && !details.isSameDocument) onNavigationStart(wc.session, details.url)
     })
     wc.on('did-navigate', (_e, url) => {
       if (!url.startsWith(`${INTERNAL_SCHEME}://${ERROR_HOST}/`)) this.failedUrl = null
