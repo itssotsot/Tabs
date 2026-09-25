@@ -1,0 +1,36 @@
+appId: com.browserr.app
+productName: Browserr
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - resources/**
+protocols:
+  - name: Web
+    schemes: [http, https]
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  extendInfo:
+    NSCameraUsageDescription: Websites you visit can ask to use your camera.
+    NSMicrophoneUsageDescription: Websites you visit can ask to use your microphone.
+    NSLocationUsageDescription: Websites you visit can ask for your location.
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: HTML document
+        CFBundleTypeRole: Viewer
+        LSItemContentTypes: [public.html]
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}

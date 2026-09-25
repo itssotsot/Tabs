@@ -1,0 +1,120 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMe(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function pairId(a, b) {
+      return a < b ? a + '_' + b : b + '_' + a;
+    }
+
+    function docPath(collection, id) {
+      return /databases/$(database)/documents/$(collection)/$(id);
+    }
+
+    function areFriends(a, b) {
+      let path = docPath('friendships', pairId(a, b));
+      return exists(path) && get(path).data.status == 'accepted';
+    }
+
+    // Public profile. Anyone signed in can look people up by username.
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['username', 'displayName', 'photoURL', 'createdAt'])
+        && request.resource.data.username is string
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 64
+        && getAfter(docPath('usernames', request.resource.data.username)).data.uid == uid;
+    }
+
+    // Username reservations. The document ID is the lowercase username.
+    match /usernames/{name} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && name.matches('^[a-z0-9_]{3,20}$')
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid
+        && getAfter(docPath('users', request.auth.uid)).data.username == name;
+      allow delete: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && getAfter(docPath('users', request.auth.uid)).data.username != name;
+    }
+
+    // One document per pair of users, ID = "<smallerUid>_<largerUid>".
+    match /friendships/{id} {
+      // Checked by ID so a user can look up a pair that doesn't exist yet.
+      allow get: if signedIn() && request.auth.uid in id.split('_');
+      allow list: if signedIn() && request.auth.uid in resource.data.members;
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['members', 'requester', 'status', 'createdAt'])
+        && request.resource.data.members is list
+        && request.resource.data.members.size() == 2
+        && request.resource.data.members[0] != request.resource.data.members[1]
+        && request.auth.uid in request.resource.data.members
+        && id == pairId(request.resource.data.members[0], request.resource.data.members[1])
+        && request.resource.data.requester == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time;
+
+      // Only the person who received the request can accept it.
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.members
+        && resource.data.requester != request.auth.uid
+        && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt'])
+        && request.resource.data.status == 'accepted';
+
+      // Either side can decline, cancel, or unfriend.
+      allow delete: if signedIn() && request.auth.uid in resource.data.members;
+    }
+
+    // A link sent from one user to a friend.
+    match /shares/{id} {
+      allow read: if signedIn()
+        && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+             'from', 'to', 'url', 'title', 'thumbnail', 'timestampSec',
+             'note', 'createdAt', 'seenAt', 'reaction'
+           ])
+        && request.resource.data.from == request.auth.uid
+        && request.resource.data.to is string
+        && request.resource.data.to != request.auth.uid
+        && request.resource.data.url is string
+        && request.resource.data.url.size() <= 4096
+        && request.resource.data.url.matches('^https?://.+')
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 500
+        && (request.resource.data.note == null
+            || (request.resource.data.note is string && request.resource.data.note.size() <= 500))
+        && (request.resource.data.thumbnail == null
+            || (request.resource.data.thumbnail is string && request.resource.data.thumbnail.size() <= 2048))
+        && (request.resource.data.timestampSec == null
+            || (request.resource.data.timestampSec is int && request.resource.data.timestampSec >= 0))
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.seenAt == null
+        && request.resource.data.reaction == null
+        && areFriends(request.auth.uid, request.resource.data.to);
+
+      // The recipient can mark it seen and react to it.
+      allow update: if signedIn()
+        && resource.data.to == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seenAt', 'reaction'])
+        && (request.resource.data.reaction == null
+            || (request.resource.data.reaction is string && request.resource.data.reaction.size() <= 16));
+
+      allow delete: if signedIn()
+        && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+    }
+  }
+}
