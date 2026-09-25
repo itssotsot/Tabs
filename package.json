@@ -14,7 +14,8 @@
     "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:win": "electron-vite build && electron-builder --win",
     "deploy:firestore": "firebase deploy --only firestore",
-    "test:rules": "firebase emulators:exec --only firestore --project browserr-rules-test \"node tests/rules.test.mjs\""
+    "test:rules": "firebase emulators:exec --only firestore --project browserr-rules-test \"node tests/rules.test.mjs\"",
+    "open:profile": "open -n dist/mac-arm64/Browserr.app --args --profile=friend"
   },
   "dependencies": {
     "@ghostery/adblocker-electron": "^2.18.2"

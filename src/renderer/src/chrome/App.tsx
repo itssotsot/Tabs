@@ -6,7 +6,14 @@ import { Sidebar } from './Sidebar'
 import { TabStrip } from './TabStrip'
 import { Toolbar } from './Toolbar'
 
-const EMPTY_STATE: WindowState = { tabs: [], activeTabId: null, htmlFullscreen: false, fullscreen: false, isBookmarked: false }
+const EMPTY_STATE: WindowState = {
+  tabs: [],
+  activeTabId: null,
+  htmlFullscreen: false,
+  fullscreen: false,
+  isBookmarked: false,
+  profile: null
+}
 
 export function App(): ReactNode {
   const api = window.browserr

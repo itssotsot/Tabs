@@ -6,6 +6,16 @@ import { INTERNAL_SCHEME } from '@shared/url'
 export const isDev = !app.isPackaged && !!process.env.ELECTRON_RENDERER_URL
 export const devServerUrl = process.env.ELECTRON_RENDERER_URL ?? ''
 
+/**
+ * Optional profile name (`--profile=<name>` or BROWSERR_PROFILE). Each profile has its own
+ * data folder, so it has its own sign-in, tabs and history and can run alongside the default one.
+ */
+export const profile: string | null = (() => {
+  const arg = process.argv.find((a) => a.startsWith('--profile='))?.slice('--profile='.length)
+  const name = (arg ?? process.env.BROWSERR_PROFILE ?? '').trim()
+  return /^[\w-]{1,32}$/.test(name) ? name : null
+})()
+
 export const rendererDir = join(__dirname, '../renderer')
 export const chromePreload = join(__dirname, '../preload/chrome.js')
 export const tabPreload = join(__dirname, '../preload/tab.js')

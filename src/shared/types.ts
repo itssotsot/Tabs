@@ -21,6 +21,8 @@ export interface WindowState {
   htmlFullscreen: boolean
   fullscreen: boolean
   isBookmarked: boolean
+  /** Set when running a named profile (e.g. a second test account). */
+  profile: string | null
 }
 
 export interface FindState {

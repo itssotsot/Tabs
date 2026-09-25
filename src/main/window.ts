@@ -3,7 +3,7 @@ import { IPC } from '@shared/api'
 import { SUGGESTION_PADDING, SUGGESTION_ROW_HEIGHT } from '@shared/constants'
 import type { ChromeCommand, Insets, OverlayState, Rect, ShareDraft, Suggestion, WindowState } from '@shared/types'
 import { NEW_TAB_URL } from '@shared/url'
-import { chromePreload, uiUrl } from './env'
+import { chromePreload, profile, uiUrl } from './env'
 import { showPageContextMenu } from './menu'
 import { draftFromTab } from './share'
 import { store, type SavedWindow } from './store'
@@ -256,10 +256,12 @@ export class BrowserWindowController implements TabHost {
       activeTabId: active?.id ?? null,
       htmlFullscreen: !!this.fullscreenTab,
       fullscreen: this.win.isFullScreen(),
-      isBookmarked: !!active && !active.isInternal && !!store.findBookmark(active.url)
+      isBookmarked: !!active && !active.isInternal && !!store.findBookmark(active.url),
+      profile
     }
     this.win.webContents.send(IPC.windowState, state)
-    this.win.setTitle(active ? `${active.state.title} – Browserr` : 'Browserr')
+    const app = profile ? `Browserr (${profile})` : 'Browserr'
+    this.win.setTitle(active ? `${active.state.title} – ${app}` : app)
     scheduleSessionSave()
   }
 

@@ -18,6 +18,16 @@ npm run dist:win   # NSIS installer (x64 and arm64) in dist/
 
 Builds are unsigned for now. On macOS, a friend opening the app for the first time needs to right-click → Open (or run `xattr -cr /Applications/Browserr.app`). Proper signing needs an Apple Developer account.
 
+## Testing with two accounts
+
+Run a second copy of the app under its own profile. It has separate sign-in, tabs and history, and shows an orange profile label in the tab strip:
+
+```bash
+npm run open:profile                    # opens a "friend" profile of the packaged app
+PROFILE=alice npm run open:profile      # any other name
+BROWSERR_PROFILE=friend npm run dev     # a profile in dev mode
+```
+
 ## One-time Firebase setup
 
 The Firebase project is `browserr-share` (Firestore in `eur3`, rules and indexes already deployed).

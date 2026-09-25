@@ -107,6 +107,11 @@ export function TabStrip({ state }: { state: WindowState }): ReactNode {
           <Plus size={16} />
         </button>
       </div>
+      {state.profile && (
+        <span className="profile-chip" title={`Profile: ${state.profile}`}>
+          {state.profile}
+        </span>
+      )}
     </div>
   )
 }

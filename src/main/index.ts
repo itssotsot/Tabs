@@ -2,13 +2,16 @@ import { app, BrowserWindow, type WebContents } from 'electron'
 import { setAdblockEnabled } from './adblock'
 import { broadcast } from './broadcast'
 import { setupDownloads } from './downloads'
-import { registerInternalProtocol, registerSchemes, webSession } from './env'
+import { profile, registerInternalProtocol, registerSchemes, webSession } from './env'
 import { registerIpc } from './ipc'
 import { buildAppMenu } from './menu'
 import { setupPermissions } from './permissions'
 import { store } from './store'
 import { BrowserWindowController, controllerFor, focusedController, freezeSession } from './window'
 import { IPC } from '@shared/api'
+import { join } from 'node:path'
+
+if (profile) app.setPath('userData', join(app.getPath('appData'), `${app.getName()} (${profile})`))
 
 registerSchemes()
 
