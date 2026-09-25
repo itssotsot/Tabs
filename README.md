@@ -48,6 +48,13 @@ python3 -m castlabs_evs.account signup    # once
 
 After that, `npm run dist:mac` / `npm run dist:win` sign the app automatically (`build/vmp-sign.cjs`). Without an account the build prints a warning and skips signing.
 
+castLabs publishes each Electron release a little after the official one, so check for updates now and then:
+
+```bash
+npm run check-electron               # compare installed vs castLabs vs official Electron
+npm run check-electron -- --update   # install the newest castLabs build in the same major version
+```
+
 ## Performance
 
 On top of Chromium, Browserr does what Chrome adds itself:
