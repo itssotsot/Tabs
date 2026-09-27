@@ -12,8 +12,8 @@ npm run dev
 Build installers:
 
 ```bash
-npm run dist:mac   # .dmg + .zip (arm64 and x64) in dist/
-npm run dist:win   # NSIS installer (x64 and arm64) in dist/
+npm run dist:mac   # .dmg + .zip for Apple Silicon in dist/
+npm run dist:win   # NSIS installer for Intel/AMD Windows in dist/
 ```
 
 Builds are unsigned for now. On macOS, a friend opening the app for the first time needs to right-click → Open (or run `xattr -cr /Applications/Tabs.app`). Proper signing needs an Apple Developer account.

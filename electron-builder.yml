@@ -34,11 +34,13 @@ mac:
   category: public.app-category.productivity
   # The updater picks this Mac's DMG by the arch in its name.
   artifactName: ${productName}-${version}-${arch}.${ext}
+  # Apple Silicon only (since 0.3.1): Intel Macs stay on 0.3.0. The zip is what makes electron-builder
+  # write latest-mac.yml, which the updater reads (it then downloads the DMG).
   target:
     - target: dmg
-      arch: [arm64, x64]
+      arch: [arm64]
     - target: zip
-      arch: [arm64, x64]
+      arch: [arm64]
   extendInfo:
     NSCameraUsageDescription: Websites you visit can ask to use your camera.
     NSMicrophoneUsageDescription: Websites you visit can ask to use your microphone.
@@ -48,9 +50,10 @@ mac:
         CFBundleTypeRole: Viewer
         LSItemContentTypes: [public.html]
 win:
+  # Intel/AMD only (since 0.3.1). Windows on ARM runs it emulated, and ARM installs update to it.
   target:
     - target: nsis
-      arch: [x64, arm64]
+      arch: [x64]
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

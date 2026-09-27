@@ -22,6 +22,7 @@ How updates behave:
 - **Windows:** downloads in the background. The toolbar's **Update** button calls `quitAndInstall`; otherwise the update installs when the app quits.
 - **Mac:** no Developer ID, so Squirrel.Mac can't swap the app. The updater downloads `Tabs-<version>-<arch>.dmg` itself and checks its sha512 against `latest-mac.yml`. **Update** then opens the DMG and quits, and the user drag-replaces the app. The DMG's `-<arch>` suffix (the `mac.artifactName` setting) is what the updater matches on.
 - Dev builds and `--profile=…` copies never check for updates.
+- Since 0.3.1, releases are Apple Silicon Mac + Intel/AMD Windows only (`electron-builder.yml` targets). Intel Macs find no `-x64.dmg` and stay on 0.3.0; Windows ARM installs update to the x64 build.
 
 ## Names: what's "Tabs" and what stays "browserr"
 
