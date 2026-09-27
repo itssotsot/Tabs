@@ -72,8 +72,14 @@ kbd {
 
 .chrome {
   display: flex;
-  flex-direction: column;
   height: 100%;
+}
+
+.chrome-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .chrome-header {
@@ -283,6 +289,34 @@ kbd {
   mask-image: linear-gradient(to right, black calc(100% - 20px), transparent);
 }
 
+/* How long ago the tab was opened. Tabs too narrow for it leave it out. */
+.tab {
+  container-type: inline-size;
+}
+
+.tab-age {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* While × is hidden, the age sits in its place (moved, not resized, so the title doesn't shift). */
+.tab:not(.link-tab):not(.active):not(:hover):not(:has(.tab-audio)) .tab-age {
+  transform: translateX(28px);
+}
+
+/* A link that isn't open shows ☆ and × on hover instead. */
+.tab.link-tab:hover .tab-age {
+  display: none;
+}
+
+@container (max-width: 110px) {
+  .tab-age {
+    display: none;
+  }
+}
+
 .tab-close,
 .tab-audio {
   flex: none;
@@ -424,6 +458,24 @@ kbd {
   box-shadow: none;
 }
 
+.update-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  margin: 0 2px;
+  border-radius: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgb(139 92 246 / 0.14);
+}
+
+.update-btn:hover {
+  background: rgb(139 92 246 / 0.24);
+}
+
 .avatar-btn {
   padding: 0;
 }
@@ -444,47 +496,7 @@ kbd {
   stroke-linecap: round;
 }
 
-/* ---------- bookmarks bar & find bar ---------- */
-
-.bookmarks-bar {
-  height: 30px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 10px 4px;
-  background: var(--bg-raised);
-  overflow: hidden;
-}
-
-.bookmark {
-  flex: none;
-  max-width: 180px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 7px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.bookmark:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.bookmark img {
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-}
-
-.bookmark span {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
+/* ---------- find bar ---------- */
 
 .findbar {
   height: 40px;
@@ -724,13 +736,7 @@ kbd {
   font-weight: 700;
 }
 
-/* ---------- link cards ---------- */
-
-.share-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+/* ---------- rooms ---------- */
 
 .list-actions {
   display: flex;
@@ -741,57 +747,332 @@ kbd {
   font-size: 12px;
 }
 
-.share-card {
-  position: relative;
+.rooms-panel,
+.room-details {
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  padding: 8px;
-  border-radius: 12px;
-  outline: 0;
+  padding-top: 6px;
 }
 
-.share-card:hover,
-.share-card:focus-visible {
+.rooms-panel section h4,
+.room-details section h4 {
+  margin: 10px 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.room-details section p {
+  margin: 6px 4px 0;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.rooms-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ghost-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.ghost-btn:hover,
+.ghost-btn.on {
+  color: var(--text);
+  background: var(--bg-input);
+}
+
+.room-row {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 6px;
+  border-radius: 10px;
+  text-align: left;
+}
+
+.room-row:hover {
   background: var(--bg-hover);
 }
 
-.share-card.unseen {
-  background: var(--accent-soft);
+.room-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.share-card.unseen::before {
-  content: '';
-  position: absolute;
-  left: -4px;
-  top: 50%;
-  width: 6px;
-  height: 6px;
-  margin-top: -3px;
+.room-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.room-row-top strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.room-row-time {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.room-row-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.room-row.unread strong {
+  font-weight: 700;
+}
+
+.room-row.unread .room-row-preview {
+  color: var(--text);
+}
+
+.unread-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--accent-2);
 }
 
-.share-thumb {
+.avatar-stack {
   position: relative;
   flex: none;
-  width: 112px;
-  height: 63px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--bg);
-  display: grid;
-  place-items: center;
+  display: inline-block;
 }
 
-.share-thumb img {
+.avatar-stack > :first-child {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.avatar-stack > :last-child {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  box-shadow: 0 0 0 2px var(--bg-raised);
+}
+
+/* The room view manages its own scrolling so the composer stays put. */
+.sidebar-body:has(> .room-view) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.room-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.room-view .room-details {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 10px 12px;
+}
+
+.room-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px 8px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.room-head-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.room-head-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-head-name span {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+}
+
+.message {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  max-width: 88%;
+}
+
+.message.grouped {
+  margin-top: 3px;
+}
+
+.message.mine {
+  align-self: flex-end;
+  justify-content: flex-end;
+}
+
+.message-avatar {
+  flex: none;
+  width: 26px;
+  padding-top: 18px;
+}
+
+.message-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.message.mine .message-body {
+  align-items: flex-end;
+}
+
+.message-meta {
+  display: flex;
+  gap: 6px;
+  margin: 0 4px 3px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.message-meta strong {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.bubble {
+  position: relative;
+  max-width: 100%;
+  padding: 7px 10px;
+  border-radius: 14px;
+  background: var(--bg-input);
+}
+
+.message.mine .bubble {
+  background: var(--accent-soft);
+}
+
+.message-text {
+  margin: 0;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.message-text a {
+  color: var(--accent);
+}
+
+.link-card + .message-text {
+  margin-top: 6px;
+}
+
+.link-card {
+  display: flex;
+  flex-direction: column;
+  width: 230px;
+  max-width: 100%;
+  margin: 1px -4px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+  outline: 0;
+}
+
+.link-card:hover,
+.link-card:focus-visible {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.link-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-raised);
+}
+
+.link-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
-.share-thumb img.share-site {
-  width: 28px;
-  height: 28px;
+.link-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 9px 8px;
+}
+
+.link-text strong {
+  font-weight: 600;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.link-text span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.link-text span img {
+  width: 12px;
+  height: 12px;
 }
 
 .share-time {
@@ -809,117 +1090,214 @@ kbd {
   color: white;
 }
 
-.share-main {
-  flex: 1;
-  min-width: 0;
+.message-tools {
+  position: absolute;
+  top: -12px;
+  right: -6px;
+  display: none;
+  padding: 1px;
+  border-radius: 8px;
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.message.mine .message-tools {
+  right: auto;
+  left: -6px;
+}
+
+.message:hover .message-tools {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
-.share-title {
-  font-weight: 600;
-  line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  padding-right: 16px;
-}
-
-.share-meta {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--text-muted);
-  font-size: 11.5px;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.share-host {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dot-sep {
-  color: var(--text-faint);
-}
-
-.share-note {
-  font-size: 12px;
-  color: var(--text);
-  font-style: italic;
-  line-height: 1.4;
-}
-
-.reactions {
+.reaction-picker {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 4px);
+  left: 0;
   display: flex;
   gap: 2px;
-  margin-top: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow);
+}
+
+.message.mine .reaction-picker {
+  left: auto;
+  right: 0;
 }
 
 .reaction {
-  width: 26px;
-  height: 22px;
-  border-radius: 6px;
-  font-size: 13px;
-  opacity: 0.55;
-  filter: grayscale(0.6);
-  transition:
-    transform 0.1s,
-    opacity 0.1s;
-}
-
-.share-card:hover .reaction {
-  opacity: 0.8;
+  width: 28px;
+  height: 26px;
+  border-radius: 7px;
+  font-size: 15px;
+  transition: transform 0.1s;
 }
 
 .reaction:hover {
-  opacity: 1 !important;
-  filter: none;
   transform: scale(1.2);
   background: var(--bg-hover);
 }
 
 .reaction.on {
-  opacity: 1 !important;
-  filter: none;
   background: var(--accent-soft);
 }
 
-.share-status {
+.reaction-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--border);
+  font-size: 12px;
+}
+
+.reaction-chip span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.reaction-chip.on {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.new-divider {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
+  gap: 8px;
+  margin: 14px 0 0;
+  color: var(--accent-2);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.new-divider::before,
+.new-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.4;
+}
+
+.seen-by {
+  align-self: flex-end;
+  margin: 4px 4px 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.composer-wrap {
+  flex: none;
+  padding: 6px 10px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.composer-wrap .form-error {
+  margin: 0 2px 6px;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+
+.composer:focus-within {
+  border-color: var(--accent);
+}
+
+.composer textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: none;
+  padding: 5px 0;
+  font: inherit;
+  color: inherit;
+  line-height: 1.4;
+  user-select: text;
+}
+
+.composer .send:not(:disabled) {
+  color: var(--accent);
+}
+
+.invite-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.invite-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px 0 4px;
+  border-radius: 13px;
+  background: var(--bg);
   color: var(--text-muted);
+  font-size: 12px;
 }
 
-.reaction-received {
-  font-size: 16px;
-}
-
-.share-delete {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  color: var(--text-muted);
-  opacity: 0;
-}
-
-.share-card:hover .share-delete {
-  opacity: 1;
-}
-
-.share-delete:hover {
-  background: var(--bg-active);
+.invite-chip:hover:not(:disabled) {
   color: var(--text);
+  background: var(--bg-input);
+}
+
+.join-code {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 9px;
+  background: var(--bg);
+}
+
+.join-code code {
+  flex: 1;
+  font: 600 14px ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  user-select: text;
+}
+
+.leave-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 4px 0;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.leave-btn:hover {
+  text-decoration: underline;
 }
 
 /* ---------- friends ---------- */
@@ -1116,6 +1494,94 @@ body.overlay-body {
   font-size: 12.5px;
 }
 
+/* ---------- overlay: a collapsed group's tabs ---------- */
+
+.group-peek {
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: #1c1c20;
+  /* The edge is drawn outside the box, so it doesn't change the size the window gave the panel. */
+  box-shadow:
+    0 0 0 1px var(--border),
+    var(--shadow);
+  overflow: hidden;
+  animation: pop-in 0.12s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.group-peek-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  color: color-mix(in srgb, var(--group) 60%, white);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.group-peek-head::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--group);
+}
+
+.group-peek-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.group-peek-list {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.group-peek-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 10px;
+  border-radius: 8px;
+  color: var(--text);
+  cursor: default;
+}
+
+.group-peek-tab:hover {
+  background: var(--bg-hover);
+}
+
+.group-peek-tab.active {
+  background: var(--bg-input);
+}
+
+.group-peek-tab.sleeping .favicon,
+.group-peek-tab.sleeping .group-peek-title {
+  opacity: 0.6;
+}
+
+.group-peek-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.group-peek-audio {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.group-peek-tab:not(:hover) .tab-close {
+  opacity: 0;
+}
+
 /* ---------- overlay: send picker ---------- */
 
 .picker-backdrop {
@@ -1202,6 +1668,13 @@ body.overlay-body {
 .picker-preview-text > span {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.picker-titles {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .picker-time {
@@ -1352,4 +1825,1006 @@ body.overlay-body {
 .tab.sleeping .favicon {
   opacity: 0.45;
   filter: grayscale(0.6);
+}
+
+/* ---------- tab layouts: shared pieces ---------- */
+
+.link-icon {
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+.link-icon .spinner {
+  width: 14px;
+  height: 14px;
+}
+
+.link-icon-face {
+  position: absolute;
+  right: -5px;
+  bottom: -4px;
+  display: flex;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--bg);
+}
+
+.tab.active .link-icon-face {
+  box-shadow: 0 0 0 1.5px var(--bg-raised);
+}
+
+.link-icon-face .avatar {
+  font-size: 7px !important;
+}
+
+.star-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--text-faint);
+  -webkit-app-region: no-drag;
+}
+
+.star-btn:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.star-btn.on {
+  color: #eab308;
+}
+
+.tab-star:not(.on),
+.vlink-star:not(.on) {
+  display: none;
+}
+
+.tab:hover .tab-star,
+.vlink:hover .vlink-star {
+  display: grid;
+}
+
+.layout-btn {
+  margin-left: 6px;
+  align-self: center;
+}
+
+.more-chip {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  margin: 0 2px;
+  border-radius: 12px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  -webkit-app-region: no-drag;
+}
+
+.more-chip:hover {
+  color: var(--text);
+  background: var(--bg-active);
+}
+
+/* A page that isn't open yet looks like a sleeping tab. */
+.tab.link-tab .tab-title {
+  color: var(--text-faint);
+}
+
+.tab.link-tab:hover .tab-title {
+  color: var(--text);
+}
+
+.tab.link-tab .favicon {
+  opacity: 0.6;
+}
+
+.tab.link-tab:hover .favicon {
+  opacity: 1;
+}
+
+.tab.link-tab:not(:hover) .tab-close {
+  display: none;
+}
+
+/* ---------- layout 3: tab groups per chat ---------- */
+
+.tab-group {
+  display: contents;
+}
+
+.group-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 150px;
+  height: 24px;
+  padding: 0 7px 0 5px;
+  margin: 0 2px 0 4px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--group) 22%, transparent);
+  color: color-mix(in srgb, var(--group) 60%, white);
+  font-size: 12px;
+  font-weight: 600;
+  -webkit-app-region: no-drag;
+}
+
+.group-chip:hover {
+  background: color-mix(in srgb, var(--group) 34%, transparent);
+}
+
+.tab-group.open .group-chip {
+  background: var(--group);
+  color: white;
+}
+
+.group-chip .avatar {
+  font-size: 8px !important;
+}
+
+.group-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.group-chip .count {
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent-2);
+  color: white;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.group-chevron {
+  flex: none;
+  opacity: 0.7;
+  transition: transform 0.15s;
+}
+
+.tab-group.open .group-chevron {
+  transform: rotate(90deg);
+}
+
+.tab.grouped::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--group);
+}
+
+.tab.grouped {
+  flex-basis: 170px;
+  min-width: 96px;
+}
+
+/* ---------- tabs grouped by site (every layout) ---------- */
+
+.group-chip .favicon {
+  width: 14px;
+  height: 14px;
+}
+
+.group-count {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.group-chip.dragging {
+  opacity: 0.4;
+}
+
+.vtab-list .group-chip {
+  max-width: none;
+  height: 28px;
+  margin: 4px 0 1px;
+  padding: 0 8px;
+}
+
+.vtab-list .group-chip .group-name {
+  flex: 1;
+  text-align: left;
+}
+
+.vtab-list .tab.grouped {
+  margin-left: 10px;
+}
+
+.vtab-list .tab.grouped::after {
+  left: -6px;
+  right: auto;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  height: auto;
+}
+
+/*
+ * A group's tabs slide up under its chip, like a drawer closing, and back out. Each tab has its own
+ * fold, which shrinks while the tab slides up and is clipped to its drawer (see SiteGroupedTabs), so
+ * together they move as one block. Everything moves in step, so it all shares one timing.
+ */
+.group-fold {
+  /* Each tab is 34px plus the 1px between tabs. */
+  --u: 35px;
+  --fold: 0.24s cubic-bezier(0.2, 0, 0, 1);
+  flex: none;
+  height: var(--u);
+  /* The tab inside spaces itself, so a folded tab takes no room. */
+  margin-top: -1px;
+  clip-path: inset(calc(var(--i) * var(--u) * -1) -24px calc((var(--k) - var(--i) - 1) * var(--u) * -1) -24px);
+  transition:
+    height var(--fold),
+    clip-path var(--fold);
+}
+
+.group-fold.stays {
+  clip-path: none;
+}
+
+.group-fold.folded {
+  height: 0;
+  clip-path: inset(0 -24px 0 -24px);
+}
+
+.group-fold-inner {
+  padding-top: 1px;
+  transition: translate var(--fold);
+}
+
+.group-fold.folded .group-fold-inner {
+  translate: 0 calc((var(--i) - var(--k)) * var(--u));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-fold,
+  .group-fold-inner {
+    transition: none;
+  }
+}
+
+/* ---------- tab overview (search tabs and links) ---------- */
+
+.overview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+}
+
+.overview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 28px 12px;
+}
+
+.overview-search {
+  flex: 1;
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 21px;
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  color: var(--text-muted);
+}
+
+.overview-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: 15px;
+  user-select: text;
+}
+
+.overview-filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 28px 14px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 13px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.filter-chip.person {
+  padding-left: 5px;
+}
+
+.filter-chip:hover {
+  color: var(--text);
+}
+
+.filter-chip.on {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.filter-sep {
+  width: 1px;
+  height: 18px;
+  align-self: center;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.overview-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 28px 28px;
+}
+
+.overview-body h3 {
+  margin: 18px 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.overview-empty {
+  margin-top: 60px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.ov-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  transition:
+    border-color 0.12s,
+    transform 0.12s;
+}
+
+.ov-card:hover {
+  border-color: #45454d;
+  transform: translateY(-1px);
+}
+
+.ov-card.active,
+.ov-card.first {
+  border-color: var(--accent);
+}
+
+.ov-card.fresh::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+.ov-thumb {
+  aspect-ratio: 16 / 9;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.ov-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ov-thumb.empty {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #24242a, #1b1b1f);
+}
+
+.ov-thumb.empty .favicon,
+.ov-thumb.empty .link-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.ov-thumb.empty .link-icon .favicon {
+  width: 28px;
+  height: 28px;
+}
+
+.ov-text {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 11px 11px;
+  min-width: 0;
+}
+
+.ov-text strong {
+  font-weight: 500;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ov-text > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ov-star,
+.ov-close {
+  position: absolute;
+  top: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: rgb(0 0 0 / 0.55);
+  color: white;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+}
+
+.ov-star {
+  right: 34px;
+}
+
+.ov-close {
+  right: 6px;
+}
+
+.ov-star.on {
+  opacity: 1;
+  color: #eab308;
+}
+
+.ov-card:hover .ov-star,
+.ov-card:hover .ov-close {
+  opacity: 1;
+}
+
+.ov-card .ov-star:only-of-type {
+  right: 6px;
+}
+
+/* ---------- layout 1: vertical sidebar ---------- */
+
+.vtabs {
+  position: relative;
+  flex: none;
+  width: 264px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+/* Inside the column: the page covers anything past its edge. */
+.vtabs-resizer {
+  position: absolute;
+  top: 0;
+  right: -1px;
+  bottom: 0;
+  z-index: 5;
+  width: 6px;
+  cursor: col-resize;
+  -webkit-app-region: no-drag;
+}
+
+.vtabs-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.vtabs-resizer:hover::after,
+.vtabs-resizer.dragging::after {
+  opacity: 1;
+  transition-delay: 0.1s;
+}
+
+html.resizing-vtabs,
+html.resizing-vtabs * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+.vtabs-head {
+  flex: none;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+  -webkit-app-region: drag;
+}
+
+/* Gives way when the column is narrow, so the buttons stay inside it. */
+.vtabs-head .profile-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vtabs-head .layout-btn {
+  margin-left: 0;
+}
+
+.vtabs-head .newtab-btn {
+  margin: 0;
+}
+
+.vtabs-spacer {
+  flex: 1;
+}
+
+.vtabs-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
+  scrollbar-width: thin;
+}
+
+.fav-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.fav-tile,
+.fav-grid .tab.pinned {
+  height: 42px;
+  width: auto;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--bg-input);
+  border: 1px solid transparent;
+}
+
+.fav-tile:hover,
+.fav-grid .tab.pinned:hover {
+  background: #33333a;
+}
+
+.fav-tile.is-open {
+  border-color: var(--border);
+}
+
+.fav-tile.active,
+.fav-grid .tab.pinned.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.vtabs-hint {
+  grid-column: 1 / -1;
+  margin: 2px 4px 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.vtabs-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 6px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.vtabs-count {
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.vroom {
+  margin-bottom: 2px;
+}
+
+.vroom-head {
+  display: flex;
+  align-items: center;
+}
+
+.vroom-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 6px 0 2px;
+  border-radius: 8px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.vroom-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.vroom-chevron {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(90deg);
+  transition: transform 0.15s;
+}
+
+.vroom.collapsed .vroom-chevron {
+  transform: none;
+}
+
+.vroom-toggle .avatar {
+  font-size: 8px !important;
+}
+
+.vroom-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vroom-toggle .count,
+.vtabs-section .count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent-2);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.vroom-head .icon-btn {
+  opacity: 0;
+}
+
+.vroom-head:hover .icon-btn {
+  opacity: 1;
+}
+
+.vlink {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 6px 0 26px;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.vlink:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.vlink.is-open {
+  color: var(--text);
+}
+
+.vlink.active {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.vlink.fresh::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-2);
+}
+
+.vlink-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vlink-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.vlink:hover .vlink-time {
+  display: none;
+}
+
+.vlink .tab-audio {
+  flex: none;
+}
+
+/* Every row keeps room for ×, even while it's hidden, so the times line up. */
+.vlink .vlink-close {
+  opacity: 0;
+}
+
+.vlink.archived {
+  padding-left: 26px;
+  color: var(--text-faint);
+}
+
+.vlink.archived .vlink-title {
+  text-decoration: line-through;
+  text-decoration-color: rgb(255 255 255 / 0.25);
+}
+
+.vlink.archived .favicon {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+
+.vlink .vlink-restore {
+  opacity: 0;
+}
+
+.vlink:hover .vlink-restore {
+  opacity: 1;
+}
+
+.vtabs-more svg {
+  vertical-align: -1px;
+  margin-right: 3px;
+}
+
+.vlink:hover .vlink-close,
+.vlink.active .vlink-close {
+  opacity: 1;
+}
+
+.vlink.sleeping .favicon {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
+
+.vtabs-more,
+.vtabs-newtab {
+  display: block;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px 0 26px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.vtabs-newtab {
+  padding-left: 10px;
+  margin-top: 2px;
+}
+
+.vtabs-more:hover,
+.vtabs-newtab:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.vtab-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.vtab-drop {
+  display: contents;
+}
+
+/* Where a dragged tab will land: indented in the group's color when it joins a group. */
+.drop-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.drop-line::before {
+  content: '';
+  position: absolute;
+  left: -3px;
+  top: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.drop-line.grouped {
+  left: 4px;
+  background: var(--group);
+}
+
+.vtab-list .tab {
+  flex: none;
+  max-width: none;
+  height: 34px;
+  border-radius: 8px;
+  padding: 0 6px 0 10px;
+}
+
+.vtab-list .tab.active {
+  background: var(--bg-input);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+.vtab-list .tab::before {
+  display: none;
+}
+
+/* The toolbar is now the top edge of the window, so it drags it. */
+.layout-vertical .toolbar {
+  -webkit-app-region: drag;
+}
+
+.layout-vertical .omnibox,
+.layout-vertical .send-btn,
+.layout-vertical .update-btn {
+  -webkit-app-region: no-drag;
+}
+
+:root:not([data-platform='darwin']) .layout-vertical .toolbar {
+  padding-right: 146px;
+}
+
+/* ---------- archived links in a chat ---------- */
+
+.message.archived .link-card {
+  opacity: 0.55;
+}
+
+.message-archived {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.message.mine .message-archived {
+  justify-content: flex-end;
+}
+
+.message-archived .link-btn {
+  font-size: 11px;
+}
+
+/* ---------- link preview while typing a message ---------- */
+
+.composer-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  padding: 6px 4px 6px 6px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.composer-preview-thumb {
+  flex: none;
+  width: 64px;
+  height: 36px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--bg-input);
+}
+
+.composer-preview-site {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0 6px;
+  border-radius: 4px;
+}
+
+.composer-preview-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.composer-preview-text strong,
+.composer-preview-text span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.composer-preview-text strong {
+  font-weight: 500;
+}
+
+.composer-preview-text span {
+  font-size: 11px;
+  color: var(--text-faint);
 }

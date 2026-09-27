@@ -1,6 +1,6 @@
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Inbox, MoreVertical, RotateCw, Send, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeft, ArrowRight, CircleArrowUp, MessagesSquare, MoreVertical, RotateCw, Send, X } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { DownloadState, SidebarPanel, WindowState } from '@shared/types'
+import type { DownloadState, SidebarPanel, UpdateReady, WindowState } from '@shared/types'
 import { useSocial } from '../social/SocialProvider'
 import { Avatar } from '../ui/Avatar'
 import { cx, shortcut } from '../ui/util'
@@ -9,13 +9,14 @@ import { Omnibox } from './Omnibox'
 interface Props {
   state: WindowState
   downloads: DownloadState[]
+  update: UpdateReady | null
   sidebar: SidebarPanel | null
   onToggleSidebar: (panel: SidebarPanel) => void
 }
 
-export function Toolbar({ state, downloads, sidebar, onToggleSidebar }: Props): ReactNode {
+export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar }: Props): ReactNode {
   const api = window.browserr
-  const { user, profile, unseenCount, incoming } = useSocial()
+  const { user, profile, unreadCount, incoming } = useSocial()
   const tab = state.tabs.find((t) => t.id === state.activeTabId) ?? null
   const canShare = !!tab && !tab.internal && !!tab.url
 
@@ -71,11 +72,11 @@ export function Toolbar({ state, downloads, sidebar, onToggleSidebar }: Props): 
 
       <button
         className={cx('icon-btn', sidebar === 'inbox' && 'pressed')}
-        title={`Links from friends (${shortcut('⌘⇧L', 'Ctrl+Shift+L')})`}
+        title={`Inbox (${shortcut('⌘⇧L', 'Ctrl+Shift+L')})`}
         onClick={() => onToggleSidebar('inbox')}
       >
-        <Inbox size={17} />
-        {unseenCount > 0 && <span className="badge">{unseenCount > 99 ? '99+' : unseenCount}</span>}
+        <MessagesSquare size={17} />
+        {unreadCount > 0 && <span className="badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
       <button
@@ -86,6 +87,13 @@ export function Toolbar({ state, downloads, sidebar, onToggleSidebar }: Props): 
         {user ? <Avatar profile={profile ?? null} photoURL={user.photoURL} size={22} /> : <Avatar profile={null} size={22} />}
         {incoming.length > 0 && <span className="badge dot" />}
       </button>
+
+      {update && (
+        <button className="update-btn" title={`Tabs ${update.version} is ready to install`} onClick={() => api.updates.install()}>
+          <CircleArrowUp size={15} />
+          <span>Update</span>
+        </button>
+      )}
 
       <button
         className="icon-btn"

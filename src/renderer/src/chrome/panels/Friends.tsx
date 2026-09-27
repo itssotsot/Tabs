@@ -1,12 +1,12 @@
-import { Check, Copy, UserPlus, X } from 'lucide-react'
+import { Check, Copy, MessageCircle, UserPlus, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { acceptFriend, addFriend, removeFriendship, type FriendRequestResult } from '../../social/api'
+import { acceptFriend, addFriend, directRoomId, removeFriendship, unfriend, type FriendRequestResult } from '../../social/api'
 import { useSocial, type Friend } from '../../social/SocialProvider'
 import { Avatar } from '../../ui/Avatar'
 
 const RESULT_TEXT: Record<FriendRequestResult, string> = {
-  sent: 'Request sent. They show up as a friend once they accept.',
-  accepted: 'They had already asked you, so you are now friends!',
+  sent: 'Request sent. Once they accept, your chat shows up in your inbox.',
+  accepted: 'They had already asked you, so you are now friends! Your chat is in your inbox.',
   'already-friends': 'You are already friends.',
   'already-requested': 'You already sent them a request.',
   'not-found': 'No one has that username.',
@@ -26,7 +26,7 @@ function FriendRow({ friend, children }: { friend: Friend; children?: ReactNode 
   )
 }
 
-export function FriendsPanel(): ReactNode {
+export function FriendsPanel({ onOpenChat }: { onOpenChat: (roomId: string) => void }): ReactNode {
   const { user, profile, friends, incoming, outgoing } = useSocial()
   const [username, setUsername] = useState('')
   const [busy, setBusy] = useState(false)
@@ -87,7 +87,10 @@ export function FriendsPanel(): ReactNode {
           <h4>Requests</h4>
           {incoming.map((f) => (
             <FriendRow key={f.friendshipId} friend={f}>
-              <button className="primary-btn compact" onClick={() => void acceptFriend(f.friendshipId)}>
+              <button
+                className="primary-btn compact"
+                onClick={() => void acceptFriend(user.uid, f.uid).then(() => onOpenChat(directRoomId(user.uid, f.uid)))}
+              >
                 Accept
               </button>
               <button className="icon-btn small" title="Decline" onClick={() => void removeFriendship(f.friendshipId)}>
@@ -103,12 +106,15 @@ export function FriendsPanel(): ReactNode {
         {friends.length === 0 && <p className="muted">No friends yet. Ask a friend for their username and add them above.</p>}
         {friends.map((f) => (
           <FriendRow key={f.friendshipId} friend={f}>
+            <button className="icon-btn small" title="Message" onClick={() => onOpenChat(directRoomId(user.uid, f.uid))}>
+              <MessageCircle size={15} />
+            </button>
             <button
               className="icon-btn small"
               title="Remove friend"
               onClick={() => {
-                if (confirm(`Remove @${f.profile?.username ?? 'this friend'}? You won't be able to send each other links.`)) {
-                  void removeFriendship(f.friendshipId)
+                if (confirm(`Remove @${f.profile?.username ?? 'this friend'}? Your chat with them will be deleted.`)) {
+                  void unfriend(user.uid, f.uid).catch(() => alert("Couldn't remove them. Try again."))
                 }
               }}
             >

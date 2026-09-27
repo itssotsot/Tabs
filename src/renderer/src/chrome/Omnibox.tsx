@@ -1,6 +1,7 @@
 import { AlertTriangle, Lock, Search, Star } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Suggestion, TabState } from '@shared/types'
+import { copyText, MENU_SEPARATOR, popupMenu } from '../ui/menu'
 import { cx, shortcut } from '../ui/util'
 
 /** How the address bar looks when you're not typing in it. */
@@ -138,6 +139,27 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
         placeholder="Search or enter address"
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          const page = !internalPage && tabUrl
+          void popupMenu([
+            { role: 'undo' },
+            { role: 'redo' },
+            MENU_SEPARATOR,
+            { role: 'cut' },
+            { role: 'copy' },
+            { role: 'paste' },
+            { label: 'Paste and Go', run: () => api.nav.pasteAndGo() },
+            { role: 'selectAll' },
+            ...(page
+              ? [
+                  MENU_SEPARATOR,
+                  { label: 'Copy Page Address', run: () => copyText(tabUrl) },
+                  { label: 'Send Page to a Friend…', run: () => api.share.openPicker() }
+                ]
+              : [])
+          ])
+        }}
         onFocus={() => {
           window.clearTimeout(blurTimer.current)
           setFocused(true)

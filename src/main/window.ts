@@ -1,12 +1,21 @@
 import { BrowserWindow, screen, WebContentsView, type ContextMenuParams, type Input, type Rectangle as ElectronRect, type Result, type WebContents } from 'electron'
 import { IPC } from '@shared/api'
-import { SUGGESTION_PADDING, SUGGESTION_ROW_HEIGHT } from '@shared/constants'
-import type { ChromeCommand, Insets, OverlayState, Rect, ShareDraft, Suggestion, WindowState } from '@shared/types'
-import { NEW_TAB_URL } from '@shared/url'
+import {
+  GROUP_PEEK_HEAD_HEIGHT,
+  GROUP_PEEK_MARGIN,
+  GROUP_PEEK_PADDING,
+  GROUP_PEEK_ROW_HEIGHT,
+  GROUP_PEEK_WIDTH,
+  SUGGESTION_PADDING,
+  SUGGESTION_ROW_HEIGHT
+} from '@shared/constants'
+import type { ChromeCommand, Insets, OverlayState, Rect, ShareDraft, Suggestion, TabLink, WindowState } from '@shared/types'
+import { NEW_TAB_URL, pageKey } from '@shared/url'
 import { chromePreload, profile, uiUrl, webSession } from './env'
-import { showPageContextMenu } from './menu'
+import { showChromeContextMenu, showPageContextMenu } from './menu'
 import { warmUp } from './predictor'
 import { draftFromTab } from './share'
+import { arrangeGroups, groupKey, siteColor, siteGroups, siteName } from './sites'
 import { store, type SavedTab, type SavedWindow } from './store'
 import { Tab, type TabHost, type TabSnapshot } from './tab'
 
@@ -43,7 +52,9 @@ export function focusedController(): BrowserWindowController | null {
 }
 
 export function saveSessionNow(): void {
-  if (sessionFrozen) return
+  // With no windows left, keep the last window's session. On Windows and Linux, closing the
+  // last window quits the app, and before-quit only fires after that window is gone.
+  if (sessionFrozen || !BrowserWindowController.all.size) return
   store.saveSession([...BrowserWindowController.all].map((c) => c.toSaved()))
 }
 
@@ -51,6 +62,8 @@ export function saveSessionNow(): void {
 export function freezeSession(): void {
   saveSessionNow()
   sessionFrozen = true
+  if (sessionTimer) clearTimeout(sessionTimer)
+  sessionTimer = null
 }
 
 function scheduleSessionSave(): void {
@@ -81,12 +94,17 @@ export class BrowserWindowController implements TabHost {
   private readonly overlay: WebContentsView
   private tabs: Tab[] = []
   private active: Tab | null = null
-  private insets: Insets = { top: 84, right: 0 }
+  private insets: Insets = { top: 84, right: 0, left: 0 }
   private overlayState: OverlayState = { mode: 'hidden' }
+  /** The collapsed group whose tabs the overlay shows, and whether the pointer is on its chip or the panel. */
+  private peek: { group: string; anchor: Rect; overChip: boolean; overPanel: boolean } | null = null
+  private peekTimer: NodeJS.Timeout | null = null
   private overlayAttached = false
   private fullscreenTab: Tab | null = null
   private enteredFullscreenForTab = false
   private stateTimer: NodeJS.Timeout | null = null
+  /** Sites whose group was broken up with Ungroup. It forms again when another tab from the site opens. */
+  private readonly suspendedSites = new Set<string>()
 
   constructor(options: WindowOptions = {}) {
     const saved = options.restore
@@ -98,7 +116,7 @@ export class BrowserWindowController implements TabHost {
       minWidth: 560,
       minHeight: 380,
       show: false,
-      title: 'Browserr',
+      title: 'Tabs',
       backgroundColor: CHROME_BG,
       titleBarStyle: 'hidden',
       ...(isMac
@@ -134,8 +152,12 @@ export class BrowserWindowController implements TabHost {
       for (const t of saved.tabs) {
         const tab = new Tab(this, t.url, { lazy: true, snapshot: snapshotOf(t) })
         tab.pinned = t.pinned
+        if (t.fromLink) tab.openedFrom(t.fromLink.key, t.fromLink.landedUrl)
+        if (t.createdAt) tab.createdAt = t.createdAt
+        if (t.joinedGroup) tab.joinedGroup = t.joinedGroup
         this.tabs.push(tab)
       }
+      this.regroup()
       this.activate(this.tabs[Math.min(saved.activeIndex, this.tabs.length - 1)] ?? this.tabs[0])
     } else if (options.urls?.length) {
       options.urls.forEach((url, i) => this.createTab(url, { active: i === 0 }))
@@ -156,6 +178,7 @@ export class BrowserWindowController implements TabHost {
     chrome.on('before-input-event', (e, input) => {
       if (this.handleInput(input)) e.preventDefault()
     })
+    chrome.on('context-menu', (_e, params) => showChromeContextMenu(this, chrome, params))
 
     const overlay = this.overlay.webContents
     overlay.on('will-navigate', (e) => e.preventDefault())
@@ -163,6 +186,7 @@ export class BrowserWindowController implements TabHost {
     overlay.on('before-input-event', (e, input) => {
       if (this.handleInput(input)) e.preventDefault()
     })
+    overlay.on('context-menu', (_e, params) => showChromeContextMenu(this, overlay, params))
 
     this.win.on('resize', () => this.layout())
     this.win.on('enter-full-screen', () => this.scheduleState())
@@ -253,9 +277,9 @@ export class BrowserWindowController implements TabHost {
         this.fullscreenTab === this.active
           ? { x: 0, y: 0, width, height }
           : {
-              x: 0,
+              x: this.insets.left,
               y: this.insets.top,
-              width: Math.max(0, width - this.insets.right),
+              width: Math.max(0, width - this.insets.left - this.insets.right),
               height: Math.max(0, height - this.insets.top)
             }
       )
@@ -274,8 +298,17 @@ export class BrowserWindowController implements TabHost {
   pushState(): void {
     if (this.win.isDestroyed()) return
     const active = this.active
+    const groups = this.currentGroups()
+    const groupNames: Record<string, string> = {}
+    const groupColors: Record<string, string> = {}
+    for (const site of groups.values()) {
+      groupNames[site] ??= siteName(site)
+      groupColors[site] ??= siteColor(site)
+    }
     const state: WindowState = {
-      tabs: this.tabs.map((t) => t.state),
+      tabs: this.tabs.map((t) => ({ ...t.state, group: groups.get(t) ?? null })),
+      groupNames,
+      groupColors,
       activeTabId: active?.id ?? null,
       htmlFullscreen: !!this.fullscreenTab,
       fullscreen: this.win.isFullScreen(),
@@ -283,7 +316,9 @@ export class BrowserWindowController implements TabHost {
       profile
     }
     this.win.webContents.send(IPC.windowState, state)
-    const app = profile ? `Browserr (${profile})` : 'Browserr'
+    // The group panel follows its tabs (titles, closing, switching).
+    if (this.peek) this.showPeek()
+    const app = profile ? `Tabs (${profile})` : 'Tabs'
     this.win.setTitle(active ? `${active.state.title} – ${app}` : app)
     scheduleSessionSave()
   }
@@ -292,11 +327,15 @@ export class BrowserWindowController implements TabHost {
 
   createTab(
     url: string = NEW_TAB_URL,
-    options: { active?: boolean; index?: number; lazy?: boolean; snapshot?: TabSnapshot } = {}
+    options: { active?: boolean; index?: number; lazy?: boolean; snapshot?: TabSnapshot; fromLink?: string | TabLink } = {}
   ): Tab {
-    const tab = new Tab(this, url, { lazy: options.lazy || !!options.snapshot, snapshot: options.snapshot })
+    const background = options.active === false && !!this.active
+    const tab = new Tab(this, url, { lazy: options.lazy || !!options.snapshot, snapshot: options.snapshot, background })
+    const link = options.fromLink
+    if (link) tab.openedFrom(typeof link === 'string' ? link : link.key, typeof link === 'string' ? undefined : link.landedUrl)
     const index = options.index ?? this.tabs.length
     this.tabs.splice(Math.min(index, this.tabs.length), 0, tab)
+    this.placeTab(tab)
     if (options.active !== false || !this.active) this.activate(tab)
     if (options.active !== false && url === NEW_TAB_URL) {
       this.focusOmnibox()
@@ -320,6 +359,7 @@ export class BrowserWindowController implements TabHost {
     }
     tab.lastActiveAt = Date.now()
     void tab.thaw()
+    tab.releaseMedia()
     this.active = tab
     // Index 0 keeps the tab under the overlay when both are attached.
     this.win.contentView.addChildView(tab.view, 0)
@@ -350,11 +390,13 @@ export class BrowserWindowController implements TabHost {
       if (next) this.activate(next)
     }
     tab.destroy()
+    // Closing the last tab leaves the window open on a new tab; Close Window (⇧⌘W) is how you close it.
     if (!this.tabs.length) {
-      this.win.close()
+      this.createTab(NEW_TAB_URL)
       return
     }
-    this.scheduleState()
+    // A group down to one tab breaks up, and that tab joins the ones in no group.
+    this.arrange()
   }
 
   closeById(id: number): void {
@@ -376,7 +418,9 @@ export class BrowserWindowController implements TabHost {
 
   reopenClosedTab(): void {
     const last = closedTabs.pop()
-    if (last) this.createTab(last.url, { snapshot: snapshotOf(last) })
+    if (!last) return
+    const tab = this.createTab(last.url, { snapshot: snapshotOf(last), fromLink: last.fromLink })
+    if (last.createdAt) tab.createdAt = last.createdAt
   }
 
   duplicateTab(tab: Tab): void {
@@ -396,8 +440,135 @@ export class BrowserWindowController implements TabHost {
 
   setPinned(tab: Tab, pinned: boolean): void {
     tab.pinned = pinned
-    // Pinning moves the tab to the end of the pinned group; unpinning to just after it.
+    // Pinning moves the tab to the end of the pinned tabs; unpinning to just after them (or into its site's group).
     this.moveTab(tab.id, this.tabs.filter((t) => t.pinned && t !== tab).length)
+    this.arrange(pinned ? undefined : tab)
+  }
+
+  /**
+   * A tab dragged to a new place. With `into`, the list said where it landed: in that group (a site's),
+   * or in no group for null. Without it, dropping it away from the rest of its group takes it out of the
+   * group until it goes to another site; dropping it back next to its site's tabs puts it back.
+   */
+  dragTab(id: number, toIndex: number, into?: string | null): void {
+    const tab = this.tabById(id)
+    if (!tab) return
+    if (into !== undefined && !tab.pinned) {
+      this.moveTab(id, toIndex)
+      if (into === null) this.leaveGroups(tab)
+      else {
+        tab.joinedGroup = into === tab.site ? null : into
+        tab.pulledOutOf = null
+      }
+      this.arrange()
+      return
+    }
+    const wasGrouped = this.currentGroups().has(tab)
+    this.moveTab(id, toIndex)
+    const key = groupKey(tab)
+    const i = this.tabs.indexOf(tab)
+    const sameGroup = (t: Tab | undefined): boolean => !!t && !t.pinned && groupKey(t) === key && t.pulledOutOf !== key
+    const nextToGroup = sameGroup(this.tabs[i - 1]) || sameGroup(this.tabs[i + 1])
+    if (wasGrouped && !nextToGroup) this.leaveGroups(tab)
+    else if (tab.pulledOutOf && nextToGroup) tab.pulledOutOf = null
+    this.arrange()
+  }
+
+  // ---- site groups ----
+
+  /** The group each tab is in: its site, when grouping is on and at least two tabs share it. */
+  private currentGroups(): Map<Tab, string> {
+    const { groupTabsBySite, ungroupedSites } = store.settings
+    if (!groupTabsBySite) return new Map()
+    return siteGroups(this.tabs, new Set([...ungroupedSites, ...this.suspendedSites]))
+  }
+
+  /** Keeps each group's tabs together. `moved` joins the end of its group. */
+  private arrange(moved?: Tab): void {
+    this.dropBrokenJoins()
+    const order = arrangeGroups(this.tabs, this.currentGroups(), moved)
+    if (order) this.tabs = order
+    this.scheduleState()
+  }
+
+  /**
+   * A tab dragged into a group that has since broken up (its other tabs closed) goes back to its own site.
+   * Not while grouping is off or the group was ungrouped: the tab comes back with the group.
+   */
+  private dropBrokenJoins(): void {
+    const { groupTabsBySite, ungroupedSites } = store.settings
+    if (!groupTabsBySite) return
+    const groups = this.currentGroups()
+    for (const tab of this.tabs) {
+      const joined = tab.joinedGroup
+      if (joined && !groups.has(tab) && !ungroupedSites.includes(joined) && !this.suspendedSites.has(joined)) tab.joinedGroup = null
+    }
+  }
+
+  /** Puts a tab that just opened or went to another site into its group (its site's, unless it was dragged into another). */
+  private placeTab(tab: Tab): void {
+    if (!this.tabs.includes(tab)) return
+    const site = tab.site
+    tab.groupedSite = site
+    tab.pulledOutOf = null
+    // Another tab from a site that was ungrouped brings its group back.
+    if (site) this.suspendedSites.delete(site)
+    this.arrange(tab)
+  }
+
+  /** Groups every tab again, e.g. after the grouping settings change. */
+  regroup(): void {
+    for (const tab of this.tabs) tab.groupedSite = tab.site
+    this.arrange()
+  }
+
+  groupOf(tab: Tab): string | undefined {
+    return this.currentGroups().get(tab)
+  }
+
+  groupTabs(site: string): Tab[] {
+    const groups = this.currentGroups()
+    return this.tabs.filter((t) => groups.get(t) === site)
+  }
+
+  /** Moves a whole group to where it was dropped: onto the tab at `toIndex`, like dragging a single tab. */
+  moveGroup(site: string, toIndex: number): void {
+    const groups = this.currentGroups()
+    const members = this.tabs.filter((t) => groups.get(t) === site)
+    const target = this.tabs[toIndex]
+    if (!members.length || !target || members.includes(target)) return
+    const after = toIndex > this.tabs.indexOf(members[0])
+    // Dropped on another group, it goes before or after that whole group.
+    const other = groups.get(target)
+    const edge = other ? (after ? this.tabs.findLast((t) => groups.get(t) === other)! : this.tabs.find((t) => groups.get(t) === other)!) : target
+    const rest = this.tabs.filter((t) => !members.includes(t))
+    const at = Math.max(rest.indexOf(edge) + (after ? 1 : 0), rest.filter((t) => t.pinned).length)
+    rest.splice(at, 0, ...members)
+    this.tabs = rest
+    this.arrange()
+  }
+
+  closeGroup(site: string): void {
+    // The active tab goes last, so closing doesn't switch to (and load) a tab that's about to close too.
+    const tabs = this.groupTabs(site).sort((a, b) => Number(a === this.active) - Number(b === this.active))
+    for (const tab of tabs) this.closeTab(tab)
+  }
+
+  ungroup(site: string): void {
+    this.suspendedSites.add(site)
+    this.arrange()
+  }
+
+  removeFromGroup(tab: Tab): void {
+    if (!this.groupOf(tab)) return
+    this.leaveGroups(tab)
+    this.arrange()
+  }
+
+  /** Takes a tab out of the group it was dragged into and its own site's, until it goes to another site. */
+  private leaveGroups(tab: Tab): void {
+    tab.joinedGroup = null
+    tab.pulledOutOf = tab.site
   }
 
   cycleTab(delta: number): void {
@@ -413,12 +584,16 @@ export class BrowserWindowController implements TabHost {
   }
 
   navigate(url: string): void {
-    const tab = this.active ?? this.createTab(url)
+    const active = this.active
+    // A chat's link stays open in its tab.
+    if (active?.onSharedLink && pageKey(url) !== pageKey(active.url)) return this.openTab(url, { active: true, opener: active })
+    const tab = active ?? this.createTab(url)
     tab.load(url)
     tab.wc.focus()
   }
 
-  onTabUpdated(): void {
+  onTabUpdated(tab: Tab): void {
+    if (tab.site !== tab.groupedSite) this.placeTab(tab)
     this.scheduleState()
   }
 
@@ -488,6 +663,7 @@ export class BrowserWindowController implements TabHost {
   }
 
   private setOverlay(state: OverlayState): void {
+    if (state.mode !== 'group') this.forgetPeek()
     this.overlayState = state
     this.overlay.webContents.send(IPC.overlayState, state)
   }
@@ -511,8 +687,8 @@ export class BrowserWindowController implements TabHost {
     this.detachOverlay()
   }
 
-  openSendPicker(draft: ShareDraft): void {
-    this.setOverlay({ mode: 'send', draft })
+  openSendPicker(draft: ShareDraft, more?: ShareDraft[]): void {
+    this.setOverlay({ mode: 'send', draft, more })
     this.attachOverlay()
     this.layout()
     this.overlay.webContents.focus()
@@ -524,11 +700,84 @@ export class BrowserWindowController implements TabHost {
     if (draft) this.openSendPicker(draft)
   }
 
+  /** Opens the send picker for several tabs at once (a whole group). */
+  async openSendPickerForTabs(tabs: Tab[]): Promise<void> {
+    const drafts = (await Promise.all(tabs.map(draftFromTab))).filter((d): d is ShareDraft => !!d)
+    const [first, ...more] = drafts
+    if (first) this.openSendPicker(first, more)
+  }
+
   closeOverlay(): void {
     const wasSend = this.overlayState.mode === 'send'
     this.setOverlay({ mode: 'hidden' })
     this.detachOverlay()
     if (wasSend) this.active?.wc.focus()
+  }
+
+  // ---- the panel of a collapsed group's tabs ----
+
+  peekGroup(group: string, anchor: Rect): void {
+    // Not over the address-bar dropdown or the send picker.
+    if (this.overlayState.mode === 'suggestions' || this.overlayState.mode === 'send') return
+    // Coming from another group's chip, its panel was about to close; this one replaces it instead.
+    this.forgetPeek()
+    this.peek = { group, anchor, overChip: true, overPanel: false }
+    this.showPeek()
+  }
+
+  unpeekGroup(now: boolean): void {
+    if (now) this.closePeek()
+    else this.peekHover('chip', false)
+  }
+
+  /** The panel closes a moment after the pointer is off both the chip and the panel, so it can cross between them. */
+  peekHover(where: 'chip' | 'panel', inside: boolean): void {
+    const peek = this.peek
+    if (!peek) return
+    if (where === 'chip') peek.overChip = inside
+    else peek.overPanel = inside
+    if (this.peekTimer) clearTimeout(this.peekTimer)
+    this.peekTimer = peek.overChip || peek.overPanel ? null : setTimeout(() => this.closePeek(), 250)
+  }
+
+  private showPeek(): void {
+    const peek = this.peek!
+    const tabs = this.groupTabs(peek.group)
+    if (!tabs.length) return this.closePeek()
+    this.setOverlay({
+      mode: 'group',
+      group: peek.group,
+      name: siteName(peek.group),
+      color: siteColor(peek.group),
+      tabs: tabs.map((t) => ({ ...t.state, group: peek.group })),
+      activeTabId: this.active?.id ?? null
+    })
+    // Beside the sidebar, its first row level with the chip, and inside the window.
+    const [width, height] = this.win.getContentSize()
+    const m = GROUP_PEEK_MARGIN
+    const boxHeight = Math.min(GROUP_PEEK_HEAD_HEIGHT + tabs.length * GROUP_PEEK_ROW_HEIGHT + GROUP_PEEK_PADDING * 2 + m * 2, height)
+    const left = Math.max(peek.anchor.x + peek.anchor.width, this.insets.left) + 8
+    const top = peek.anchor.y - GROUP_PEEK_PADDING - (GROUP_PEEK_HEAD_HEIGHT - peek.anchor.height) / 2
+    this.overlay.setBounds({
+      x: Math.round(Math.min(left - m, width - GROUP_PEEK_WIDTH - m * 2)),
+      y: Math.round(Math.max(0, Math.min(top - m, height - boxHeight))),
+      width: GROUP_PEEK_WIDTH + m * 2,
+      height: Math.round(boxHeight)
+    })
+    if (!this.overlayAttached) this.attachOverlay()
+  }
+
+  private closePeek(): void {
+    this.forgetPeek()
+    if (this.overlayState.mode !== 'group') return
+    this.setOverlay({ mode: 'hidden' })
+    this.detachOverlay()
+  }
+
+  private forgetPeek(): void {
+    if (this.peekTimer) clearTimeout(this.peekTimer)
+    this.peekTimer = null
+    this.peek = null
   }
 
   pickSuggestion(index: number): void {

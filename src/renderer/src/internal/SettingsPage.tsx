@@ -1,6 +1,8 @@
+import { X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
-import type { AppInfo, SearchEngine, Settings } from '@shared/types'
-import { SEARCH_ENGINE_NAMES } from '@shared/url'
+import { TAB_LAYOUTS } from '@shared/constants'
+import type { AppInfo, SearchEngine, Settings, TabLayout } from '@shared/types'
+import { INTERNAL_SCHEME, SEARCH_ENGINE_NAMES } from '@shared/url'
 
 function Toggle({ label, detail, checked, onChange }: { label: string; detail?: string; checked: boolean; onChange: (v: boolean) => void }): ReactNode {
   return (
@@ -50,6 +52,45 @@ export function SettingsPage(): ReactNode {
             ))}
           </select>
         </label>
+        <label className="setting">
+          <span className="setting-text">
+            <strong>Tab layout</strong>
+            <span>{TAB_LAYOUTS.find((l) => l.id === settings.tabLayout)?.description}. You can also switch from View › Tab Layout.</span>
+          </span>
+          <select value={settings.tabLayout} onChange={(e) => void update({ tabLayout: e.target.value as TabLayout })}>
+            {TAB_LAYOUTS.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Toggle
+          label="Group tabs by site"
+          detail="When two or more tabs are from the same site, like YouTube, they sit together in a group you can collapse. Right-click a group for more."
+          checked={settings.groupTabsBySite}
+          onChange={(v) => void update({ groupTabsBySite: v })}
+        />
+        {settings.groupTabsBySite && settings.ungroupedSites.length > 0 && (
+          <div className="setting">
+            <span className="setting-text">
+              <strong>Sites that aren't grouped</strong>
+              <span>Click a site to group its tabs again.</span>
+              <span className="site-chips">
+                {settings.ungroupedSites.map((site) => (
+                  <button
+                    key={site}
+                    className="site-chip"
+                    title={`Group ${site} tabs again`}
+                    onClick={() => void update({ ungroupedSites: settings.ungroupedSites.filter((s) => s !== site) })}
+                  >
+                    {site} <X size={12} />
+                  </button>
+                ))}
+              </span>
+            </span>
+          </div>
+        )}
         <Toggle
           label="Reopen tabs on startup"
           detail="Pick up where you left off."
@@ -58,20 +99,15 @@ export function SettingsPage(): ReactNode {
         />
         <Toggle
           label="Memory Saver"
-          detail="Pause tabs you haven't used for 5 minutes and unload them after 30. They come back when you open them. Tabs playing audio, pinned tabs and sites that send you notifications stay awake."
+          detail="Pause tabs you haven't used for 5 minutes and unload them after 30. They come back when you open them. Pinned tabs, tabs playing audio and sites that send you notifications stay awake."
           checked={settings.memorySaver}
           onChange={(v) => void update({ memorySaver: v })}
-        />
-        <Toggle
-          label="Show bookmarks bar"
-          checked={settings.showBookmarksBar}
-          onChange={(v) => void update({ showBookmarksBar: v })}
         />
         {info && (
           <div className="setting">
             <span className="setting-text">
               <strong>Default browser</strong>
-              <span>{info.isDefaultBrowser ? 'Browserr is your default browser.' : 'Open links from other apps in Browserr.'}</span>
+              <span>{info.isDefaultBrowser ? 'Tabs is your default browser.' : 'Open links from other apps in Tabs.'}</span>
             </span>
             {!info.isDefaultBrowser && (
               <button
@@ -89,6 +125,19 @@ export function SettingsPage(): ReactNode {
       </section>
 
       <section className="card">
+        <h2>Extensions</h2>
+        <div className="setting">
+          <span className="setting-text">
+            <strong>Chrome extensions</strong>
+            <span>Add extensions from the Chrome Web Store, and turn them off or remove them.</span>
+          </span>
+          <button className="secondary-btn" onClick={() => (location.href = `${INTERNAL_SCHEME}://extensions/`)}>
+            Manage
+          </button>
+        </div>
+      </section>
+
+      <section className="card">
         <h2>Privacy</h2>
         <Toggle
           label="Block ads and trackers"
@@ -99,7 +148,7 @@ export function SettingsPage(): ReactNode {
         <div className="setting">
           <span className="setting-text">
             <strong>Clear browsing data</strong>
-            <span>History, cookies, cache and site permissions. Your friends and links are not affected.</span>
+            <span>History, cookies, cache and site permissions. Your friends and chats are not affected.</span>
           </span>
           <button
             className="danger-btn"
@@ -118,7 +167,7 @@ export function SettingsPage(): ReactNode {
         <h2>Sharing</h2>
         <Toggle
           label="Notifications"
-          detail="Get notified when a friend sends you a link or reacts to one of yours."
+          detail="Get notified about new messages, friend requests and group invites."
           checked={settings.notifications}
           onChange={(v) => void update({ notifications: v })}
         />

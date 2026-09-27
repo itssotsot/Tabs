@@ -23,7 +23,7 @@ export const tabPreload = join(__dirname, '../preload/tab.js')
 /** Host under browserr:// that serves the browser's own UI. Never reachable from tabs. */
 const APP_HOST = 'app'
 /** Hosts under browserr:// that tabs may load. */
-export const INTERNAL_PAGES = ['newtab', 'history', 'bookmarks', 'settings', 'error'] as const
+export const INTERNAL_PAGES = ['newtab', 'history', 'bookmarks', 'settings', 'extensions', 'error'] as const
 
 /** URL of a UI page (index.html / overlay.html) for the chrome and overlay views. */
 export function uiUrl(page: 'index' | 'overlay'): string {

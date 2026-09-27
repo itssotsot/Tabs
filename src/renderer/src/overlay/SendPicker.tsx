@@ -3,18 +3,19 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ShareDraft } from '@shared/types'
 import { hostOf } from '@shared/url'
 import { formatTimestamp, shareUrl } from '@shared/youtube'
-import { sendShare, signInWithGoogle } from '../social/api'
-import { useSocial, type Friend } from '../social/SocialProvider'
-import { Avatar } from '../ui/Avatar'
+import { sendMessage, signInWithGoogle, type Room } from '../social/api'
+import { displayName, roomTitle, useSocial } from '../social/SocialProvider'
+import { RoomAvatar } from '../ui/Avatar'
 import { cx, siteIcon } from '../ui/util'
 
-const LAST_RECIPIENT_KEY = 'browserr.lastRecipient'
+const LAST_ROOM_KEY = 'browserr.lastRoom'
 const CLOSE_DELAY_MS = 650
 /** Don't offer "start at 0:03": that's just the beginning. */
 const MIN_TIMESTAMP_SEC = 5
 
-export function SendPicker({ draft }: { draft: ShareDraft }): ReactNode {
-  const { authReady, user, profile, friends } = useSocial()
+/** Sends `draft` (and `more`, when sending a whole tab group) to a chat. */
+export function SendPicker({ draft, more = [] }: { draft: ShareDraft; more?: ShareDraft[] }): ReactNode {
+  const { authReady, user, profile, rooms, people } = useSocial()
   const api = window.browserr.overlay
   const [query, setQuery] = useState('')
   const [note, setNote] = useState('')
@@ -45,37 +46,50 @@ export function SendPicker({ draft }: { draft: ShareDraft }): ReactNode {
     return () => window.removeEventListener('focus', focus)
   }, [])
 
+  // `rooms` is already most-recently-active first; the room we last sent to goes on top.
   const ordered = useMemo(() => {
-    const last = localStorage.getItem(LAST_RECIPIENT_KEY)
-    return [...friends].sort((a, b) => Number(b.uid === last) - Number(a.uid === last))
-  }, [friends])
+    const last = localStorage.getItem(LAST_ROOM_KEY)
+    return [...rooms].sort((a, b) => Number(b.id === last) - Number(a.id === last))
+  }, [rooms])
+
+  const memberNames = (room: Room): string =>
+    room.members
+      .filter((m) => m !== user?.uid)
+      .map((m) => displayName(people[m]))
+      .join(', ') || 'Just you'
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase().replace(/^@/, '')
     if (!q) return ordered
     return ordered.filter(
-      (f) => f.profile?.username.includes(q) || f.profile?.displayName.toLowerCase().includes(q)
+      (r) =>
+        roomTitle(r, user?.uid ?? '', people).toLowerCase().includes(q) ||
+        r.members.some((m) => people[m]?.username.includes(q) || people[m]?.displayName.toLowerCase().includes(q))
     )
-  }, [ordered, query])
+  }, [ordered, query, people])
 
   useEffect(() => setSelected(0), [query])
 
-  const hasTimestamp = (draft.timestampSec ?? 0) >= MIN_TIMESTAMP_SEC
+  const drafts = [draft, ...more]
+  // Several links go without timestamps: one checkbox can't speak for all of them.
+  const hasTimestamp = !more.length && (draft.timestampSec ?? 0) >= MIN_TIMESTAMP_SEC
 
-  async function send(friend: Friend, keepOpen: boolean): Promise<void> {
+  async function send(room: Room, keepOpen: boolean): Promise<void> {
     if (!user || sending) return
-    setSending(friend.uid)
+    setSending(room.id)
     setError('')
     try {
-      await sendShare(user.uid, friend.uid, {
-        url: shareUrl(draft.url, draft.timestampSec, withTime && hasTimestamp),
-        title: draft.title,
-        thumbnail: draft.thumbnail,
-        timestampSec: withTime && hasTimestamp ? draft.timestampSec : null,
-        note: note || null
-      })
-      localStorage.setItem(LAST_RECIPIENT_KEY, friend.uid)
-      setSentTo((prev) => [...prev, friend.uid])
+      // One message per link, in tab order; the note goes with the first.
+      for (const [i, d] of drafts.entries()) {
+        await sendMessage(room.id, user.uid, i === 0 ? note || null : null, {
+          url: shareUrl(d.url, d.timestampSec, withTime && hasTimestamp),
+          title: d.title,
+          thumbnail: d.thumbnail,
+          timestampSec: withTime && hasTimestamp ? d.timestampSec : null
+        })
+      }
+      localStorage.setItem(LAST_ROOM_KEY, room.id)
+      setSentTo((prev) => [...prev, room.id])
       if (!keepOpen) closeTimer.current = window.setTimeout(() => api.close(), CLOSE_DELAY_MS)
     } catch {
       setError("Couldn't send. Check your connection and try again.")
@@ -125,10 +139,10 @@ export function SendPicker({ draft }: { draft: ShareDraft }): ReactNode {
         </button>
       </div>
     )
-  } else if (!profile || friends.length === 0) {
+  } else if (!profile || rooms.length === 0) {
     content = (
       <div className="picker-empty">
-        <p>{profile ? 'Add a friend first. They need Browserr too.' : 'Pick a username to get started.'}</p>
+        <p>{profile ? 'Add a friend first. They need Tabs too.' : 'Pick a username to get started.'}</p>
         <button className="primary-btn" onClick={() => api.openPanel('friends')}>
           <UserPlus size={15} />
           {profile ? 'Add friends' : 'Set up your profile'}
@@ -150,33 +164,33 @@ export function SendPicker({ draft }: { draft: ShareDraft }): ReactNode {
           />
         </div>
         <div className="picker-friends" role="listbox">
-          {filtered.map((f, i) => {
-            const done = sentTo.includes(f.uid)
+          {filtered.map((room, i) => {
+            const done = sentTo.includes(room.id)
             return (
               <button
-                key={f.uid}
+                key={room.id}
                 role="option"
                 aria-selected={i === selected}
                 className={cx('picker-friend', i === selected && 'selected', done && 'done')}
                 onMouseEnter={() => setSelected(i)}
-                onClick={(e) => void send(f, e.shiftKey)}
+                onClick={(e) => void send(room, e.shiftKey)}
               >
-                <Avatar profile={f.profile} size={30} />
+                <RoomAvatar room={room} me={user.uid} people={people} size={30} />
                 <span className="picker-friend-name">
-                  <strong>{f.profile?.displayName ?? '…'}</strong>
-                  <span>@{f.profile?.username}</span>
+                  <strong>{roomTitle(room, user.uid, people)}</strong>
+                  <span>{memberNames(room)}</span>
                 </span>
-                {sending === f.uid ? <span className="spinner" /> : done ? <Check size={16} className="sent-check" /> : <Send size={14} className="send-hint" />}
+                {sending === room.id ? <span className="spinner" /> : done ? <Check size={16} className="sent-check" /> : <Send size={14} className="send-hint" />}
               </button>
             )
           })}
-          {filtered.length === 0 && <p className="muted picker-none">No friends match “{query}”.</p>}
+          {filtered.length === 0 && <p className="muted picker-none">No rooms match “{query}”.</p>}
         </div>
         <input
           className="picker-note"
           value={note}
           maxLength={500}
-          placeholder="Add a note (optional)"
+          placeholder="Add a message (optional)"
           onChange={(e) => setNote(e.target.value)}
           onKeyDown={onKeyDown}
         />
@@ -192,8 +206,10 @@ export function SendPicker({ draft }: { draft: ShareDraft }): ReactNode {
             {draft.thumbnail ? <img src={draft.thumbnail} alt="" /> : <img className="site" src={siteIcon(draft.url, 64)} alt="" />}
           </div>
           <div className="picker-preview-text">
-            <strong>{draft.title}</strong>
-            <span>{hostOf(draft.url)}</span>
+            <strong>{more.length ? `${drafts.length} links` : draft.title}</strong>
+            <span className={cx(more.length > 0 && 'picker-titles')} title={more.length ? drafts.map((d) => d.title).join('\n') : undefined}>
+              {more.length ? drafts.map((d) => d.title).join(' · ') : hostOf(draft.url)}
+            </span>
             {hasTimestamp && (
               <label className="picker-time">
                 <input type="checkbox" checked={withTime} onChange={(e) => setWithTime(e.target.checked)} />

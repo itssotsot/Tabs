@@ -21,9 +21,13 @@ export function bookmarksChanged(): void {
 export function toggleBookmark(c: BrowserWindowController): void {
   const tab = c.activeTab
   if (!tab || tab.isInternal) return
-  const existing = store.findBookmark(tab.url)
+  toggleBookmarkUrl(tab.url, tab.state.title)
+}
+
+export function toggleBookmarkUrl(url: string, title: string): void {
+  const existing = store.findBookmark(url)
   if (existing) store.removeBookmark(existing.id)
-  else store.addBookmark(tab.url, tab.state.title)
+  else store.addBookmark(url, title)
   bookmarksChanged()
 }
 
@@ -31,5 +35,6 @@ export function toggleBookmark(c: BrowserWindowController): void {
 export function settingsChanged(): void {
   void setAdblockEnabled(webSession(), store.settings.adblock)
   buildAppMenu()
+  for (const c of BrowserWindowController.all) c.regroup()
   broadcast(IPC.settingsChanged, store.settings)
 }

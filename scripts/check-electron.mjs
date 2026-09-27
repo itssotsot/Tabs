@@ -65,7 +65,7 @@ function update(target) {
   // Make sure the Electron binary itself is downloaded.
   execFileSync('node', ['node_modules/electron/install.js'], { cwd: root, stdio: 'inherit', env })
   console.log(green(`\nUpdated to ${format(target)}.`))
-  console.log('Quit Browserr, then run `npm run app:mac` to rebuild the app with it.')
+  console.log('Quit Tabs, then run `npm run app:mac` to rebuild the app with it.')
 }
 
 const current = installedVersion()

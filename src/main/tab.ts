@@ -8,10 +8,13 @@ import {
   type Result,
   type WebContents
 } from 'electron'
-import type { TabState } from '@shared/types'
-import { INTERNAL_SCHEME, isInternalUrl, NEW_TAB_URL, prettyUrl } from '@shared/url'
+import { IPC } from '@shared/api'
+import type { TabLink, TabState } from '@shared/types'
+import { INTERNAL_SCHEME, isInternalUrl, NEW_TAB_URL, pageKey, prettyUrl } from '@shared/url'
 import { tabPreload, webSession } from './env'
+import { applyIdentity } from './identity'
 import { onNavigationStart } from './predictor'
+import { learnSiteName, siteOf, type Groupable } from './sites'
 import { store, type SavedTab } from './store'
 
 /** What a tab needs from the window that owns it. */
@@ -55,11 +58,23 @@ function trimHistory(entries: NavigationEntry[], index: number, max: number): { 
  * A browser tab. Its page (a WebContentsView) is created on demand, so restored
  * tabs cost nothing until opened and idle tabs can be unloaded to free memory.
  */
-export class Tab {
+export class Tab implements Groupable {
   readonly id = nextTabId++
   pinned = false
+  pulledOutOf: string | null = null
+  joinedGroup: string | null = null
+  /** When the tab was opened. Restored and reopened tabs keep theirs. */
+  createdAt = Date.now()
+  /** The link from a chat this tab was opened from. */
+  fromLink: TabLink | null = null
+  /** False until the page opened from `fromLink` commits, which tells us where its redirects led. */
+  private linkLanded = true
+  /** The site the window last grouped this tab by, to notice when it changes. Undefined until it's placed. */
+  groupedSite: string | null | undefined = undefined
   /** When the user last looked at this tab. */
   lastActiveAt = Date.now()
+  /** Opened in the background and not looked at yet: its videos wait until the tab is shown. */
+  private holdMedia: boolean
   private viewInstance: WebContentsView | null = null
   /** Present while the page isn't loaded (lazy restore or unloaded to save memory). */
   private snapshot: TabSnapshot | null = null
@@ -70,13 +85,15 @@ export class Tab {
   /** Set while showing our error page, so the address bar keeps the URL that failed. */
   private failedUrl: string | null = null
   private requestedUrl: string
+  private siteCache: { url: string; site: string | null } | null = null
 
   constructor(
     private readonly host: TabHost,
     url: string,
-    options: { lazy?: boolean; snapshot?: TabSnapshot } = {}
+    options: { lazy?: boolean; snapshot?: TabSnapshot; background?: boolean } = {}
   ) {
     this.requestedUrl = url
+    this.holdMedia = !!options.background
     if (options.lazy) {
       this.snapshot = options.snapshot ?? { url, title: '', favicon: null }
     } else {
@@ -114,8 +131,25 @@ export class Tab {
     return !this.failedUrl && isInternalUrl(this.url)
   }
 
+  get site(): string | null {
+    const url = this.url
+    if (this.siteCache?.url !== url) this.siteCache = { url, site: siteOf(url) }
+    return this.siteCache.site
+  }
+
   get title(): string {
     return this.snapshot ? this.snapshot.title : (this.liveWc?.getTitle() ?? '')
+  }
+
+  get holdingMedia(): boolean {
+    return this.holdMedia
+  }
+
+  /** The tab is being shown for the first time: videos it held back may play now. */
+  releaseMedia(): void {
+    if (!this.holdMedia) return
+    this.holdMedia = false
+    this.liveWc?.send(IPC.pageReleaseMedia)
   }
 
   get muted(): boolean {
@@ -126,7 +160,19 @@ export class Tab {
     return this.liveWc?.isCurrentlyAudible() ?? false
   }
 
-  get state(): TabState {
+  /** The tab's state for the browser UI; the window adds which group it's in. */
+  /** Marks the tab as opened from a shared link. `landedUrl` is known for restored tabs; new ones learn it when the page loads. */
+  openedFrom(key: string, landedUrl?: string): void {
+    this.fromLink = { key, landedUrl: landedUrl ?? this.url }
+    this.linkLanded = landedUrl !== undefined
+  }
+
+  /** On the page a chat's link opened, so the tab shows in the chat's group. Going anywhere else opens a new tab. */
+  get onSharedLink(): boolean {
+    return !!this.fromLink && pageKey(this.url) === pageKey(this.fromLink.landedUrl)
+  }
+
+  get state(): Omit<TabState, 'group'> {
     const url = this.url
     const isNewTab = url.startsWith(NEW_TAB_URL)
     const wc = this.liveWc
@@ -145,9 +191,12 @@ export class Tab {
       muted: this.muted,
       pinned: this.pinned,
       zoomPercent: wc ? Math.round(wc.getZoomFactor() * 100) : 100,
-      secure: url.startsWith('https:') || this.isInternal,
+      // Extension pages come from the extension's own files, like browserr:// pages.
+      secure: url.startsWith('https:') || url.startsWith('chrome-extension:') || this.isInternal,
       internal: this.isInternal,
-      sleeping: !wc
+      sleeping: !wc,
+      fromLink: this.fromLink,
+      createdAt: this.createdAt
     }
   }
 
@@ -192,17 +241,19 @@ export class Tab {
     return this.frozen
   }
 
-  /** Pauses the page (like Chrome's tab freezing). Uses the DevTools protocol, so skipped while DevTools is open. */
+  /**
+   * Pauses the page (like Chrome's tab freezing). Uses the DevTools protocol, so skipped while
+   * DevTools is open. The debugger stays attached: it also carries the browser identity override.
+   */
   async freeze(): Promise<boolean> {
     const wc = this.liveWc
     if (!wc || this.frozen || wc.isDevToolsOpened()) return false
     try {
-      if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
+      applyIdentity(wc)
       await wc.debugger.sendCommand('Page.setWebLifecycleState', { state: 'frozen' })
       this.frozen = true
       return true
     } catch {
-      if (wc.debugger.isAttached()) wc.debugger.detach()
       return false
     }
   }
@@ -216,8 +267,6 @@ export class Tab {
       await wc.debugger.sendCommand('Page.setWebLifecycleState', { state: 'active' })
     } catch {
       // Page navigated or was reloaded; it's active anyway.
-    } finally {
-      if (wc.debugger.isAttached()) wc.debugger.detach()
     }
   }
 
@@ -252,7 +301,17 @@ export class Tab {
   toSaved(): SavedTab {
     const snap = this.captureSnapshot(false)
     const entries = snap.entries?.map((e) => ({ url: e.url, title: e.title }))
-    return { url: snap.url, pinned: this.pinned, title: snap.title, favicon: snap.favicon, entries, index: snap.index }
+    return {
+      url: snap.url,
+      pinned: this.pinned,
+      title: snap.title,
+      favicon: snap.favicon,
+      entries,
+      index: snap.index,
+      fromLink: this.fromLink ?? undefined,
+      createdAt: this.createdAt,
+      joinedGroup: this.joinedGroup ?? undefined
+    }
   }
 
   load(url: string): void {
@@ -317,6 +376,8 @@ export class Tab {
 
   private wire(wc: WebContents): void {
     const update = (): void => this.host.onTabUpdated(this)
+    // Single-page sites (YouTube) often only name themselves on some pages, so in-page navigations count too.
+    const learnName = (): void => void learnSiteName(wc).then((learned) => learned && update())
 
     wc.on('did-start-loading', () => {
       this.loading = true
@@ -332,12 +393,17 @@ export class Tab {
     wc.on('did-navigate', (_e, url) => {
       if (!url.startsWith(`${INTERNAL_SCHEME}://${ERROR_HOST}/`)) this.failedUrl = null
       this.favicon = null
+      if (this.fromLink && !this.linkLanded && !isInternalUrl(url)) {
+        this.fromLink = { ...this.fromLink, landedUrl: url }
+        this.linkLanded = true
+      }
       store.recordVisit(url, wc.getTitle())
       update()
     })
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
       if (!isMainFrame) return
       store.recordVisit(url, wc.getTitle())
+      learnName()
       update()
     })
     wc.on('page-title-updated', (_e, title) => {
@@ -348,6 +414,7 @@ export class Tab {
       this.favicon = favicons[0] ?? null
       update()
     })
+    wc.on('did-finish-load', learnName)
     wc.on('audio-state-changed', update)
     wc.on('zoom-changed', (_e, direction) => this.zoom(direction))
 

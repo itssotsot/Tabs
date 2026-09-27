@@ -25,11 +25,11 @@ function show(message: string, kind: 'info' | 'ok' | 'error' = 'info'): void {
 }
 
 if (!port || !/^\d+$/.test(port) || !state) {
-  show('This sign-in link is invalid. Start signing in again from Browserr.', 'error')
+  show('This sign-in link is invalid. Start signing in again from Tabs.', 'error')
   button.hidden = true
 }
 
-// In-memory only: this browser shouldn't stay signed in to Browserr.
+// In-memory only: this browser shouldn't stay signed in to Tabs.
 const auth = initializeAuth(initializeApp(firebaseConfig), {
   persistence: inMemoryPersistence,
   popupRedirectResolver: browserPopupRedirectResolver
@@ -52,10 +52,10 @@ button.addEventListener('click', async () => {
       body: JSON.stringify({ state, idToken: credential.idToken, accessToken: credential.accessToken ?? null })
     })
     await signOut(auth)
-    if (!res.ok) throw new Error('Browserr rejected the sign-in. Try again from the app.')
+    if (!res.ok) throw new Error('Tabs rejected the sign-in. Try again from the app.')
 
     button.hidden = true
-    show(`Signed in as ${result.user.email}. You can close this tab and go back to Browserr.`, 'ok')
+    show(`Signed in as ${result.user.email}. You can close this tab and go back to Tabs.`, 'ok')
     setTimeout(() => window.close(), 1500)
   } catch (err) {
     button.disabled = false
@@ -67,7 +67,7 @@ button.addEventListener('click', async () => {
     } else if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
       show('Google sign-in is not enabled for this Firebase project yet.', 'error')
     } else if (err instanceof TypeError) {
-      show('Could not reach Browserr. Make sure the app is still open, then start again from it.', 'error')
+      show('Could not reach Tabs. Make sure the app is still open, then start again from it.', 'error')
     } else {
       show((err as Error).message || 'Something went wrong.', 'error')
     }

@@ -1,5 +1,6 @@
 import type { ShareDraft } from '@shared/types'
-import { cleanYouTubeTitle, parseYouTube, youTubeThumbnail, youTubeUrl } from '@shared/youtube'
+import { cleanYouTubeTitle, parseYouTube, youTubeStart, youTubeThumbnail, youTubeUrl } from '@shared/youtube'
+import { webSession } from './env'
 import type { Tab } from './tab'
 
 interface PageMeta {
@@ -67,4 +68,117 @@ export function draftFromLink(url: string, text: string): ShareDraft | null {
     thumbnail: youtube ? youTubeThumbnail(youtube) : null,
     timestampSec: null
   }
+}
+
+// ---- links typed into a chat ----
+
+const FETCH_TIMEOUT_MS = 6000
+/** The <head> is all we need; stop reading after this much. */
+const MAX_HTML_BYTES = 512 * 1024
+
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
+
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, code: string) => {
+    if (code[0] === '#') {
+      const n = code[1].toLowerCase() === 'x' ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10)
+      return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : whole
+    }
+    return ENTITIES[code.toLowerCase()] ?? whole
+  })
+}
+
+/** og:/twitter: tags and the <title>, read from the start of an HTML page. */
+function metaFromHtml(html: string, baseUrl: string): PageMeta {
+  const tags = new Map<string, string>()
+  for (const [tag] of html.matchAll(/<meta\b[^>]*>/gi)) {
+    const attrs: Record<string, string> = {}
+    for (const m of tag.matchAll(/([a-zA-Z:_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)) {
+      attrs[m[1].toLowerCase()] = m[2] ?? m[3] ?? m[4] ?? ''
+    }
+    const name = (attrs.property ?? attrs.name ?? '').toLowerCase()
+    if (name && attrs.content && !tags.has(name)) tags.set(name, decodeEntities(attrs.content).trim())
+  }
+  const titleTag = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]
+  const image = tags.get('og:image') ?? tags.get('og:image:url') ?? tags.get('twitter:image') ?? tags.get('twitter:image:src')
+  let imageUrl: string | null = null
+  if (image) {
+    try {
+      imageUrl = new URL(image, baseUrl).href
+    } catch {
+      imageUrl = null
+    }
+  }
+  return {
+    title: tags.get('og:title') ?? tags.get('twitter:title') ?? (titleTag ? decodeEntities(titleTag).replace(/\s+/g, ' ').trim() : ''),
+    image: imageUrl && /^https?:/.test(imageUrl) ? imageUrl : null,
+    time: null
+  }
+}
+
+async function readHead(url: string): Promise<{ html: string; finalUrl: string } | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    // The browser's own session, so sites that need you signed in (or past a cookie wall) show real titles.
+    const res = await webSession().fetch(url, { signal: controller.signal, headers: { accept: 'text/html,application/xhtml+xml' } })
+    if (!res.ok || !/html/i.test(res.headers.get('content-type') ?? '') || !res.body) return null
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let html = ''
+    let bytes = 0
+    while (bytes < MAX_HTML_BYTES) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bytes += value.byteLength
+      html += decoder.decode(value, { stream: true })
+      if (/<\/head>/i.test(html)) break
+    }
+    void reader.cancel().catch(() => {})
+    return { html, finalUrl: res.url || url }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function youTubeTitle(url: string): Promise<string | null> {
+  try {
+    const res = await webSession().fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { title?: unknown }
+    return typeof data.title === 'string' ? data.title : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Title and thumbnail for a link typed into a chat, the same things the send picker attaches.
+ * Reads them from an open tab showing the page when there is one, otherwise from the page itself.
+ * Keeps the URL as typed (including a YouTube start time).
+ */
+export async function draftFromUrl(url: string, openTab?: Tab): Promise<ShareDraft | null> {
+  if (!/^https?:\/\//i.test(url)) return null
+  const youtube = parseYouTube(url)
+  const start = youtube?.kind === 'video' ? youTubeStart(url) : null
+
+  if (openTab) {
+    const fromTab = await draftFromTab(openTab)
+    if (fromTab) return { ...fromTab, url, timestampSec: start }
+  }
+
+  if (youtube) {
+    const title = await youTubeTitle(youTubeUrl(youtube))
+    return { url, title: title ? cleanYouTubeTitle(title) : 'YouTube video', thumbnail: youTubeThumbnail(youtube), timestampSec: start }
+  }
+
+  const page = await readHead(url)
+  if (!page) return null
+  const meta = metaFromHtml(page.html, page.finalUrl)
+  if (!meta.title && !meta.image) return null
+  return { url, title: meta.title || url, thumbnail: meta.image, timestampSec: null }
 }

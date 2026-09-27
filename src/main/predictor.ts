@@ -78,8 +78,8 @@ function learn(pageUrl: string, requestUrl: string): void {
 }
 
 export function setupPredictor(ses: Session): void {
-  // Only onCompleted: the ad blocker owns onBeforeRequest/onHeadersReceived, and
-  // Electron allows one listener per event.
+  // Only onCompleted: the ad blocker owns onBeforeRequest/onHeadersReceived, identity.ts owns
+  // onBeforeSendHeaders, and Electron allows one listener per event.
   ses.webRequest.onCompleted({ urls: ['http://*/*', 'https://*/*'] }, (details) => {
     if (details.resourceType === 'mainFrame' || details.fromCache || details.statusCode >= 400) return
     const wc = details.webContents

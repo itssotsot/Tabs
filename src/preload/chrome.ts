@@ -13,7 +13,11 @@ const api: BrowserrAPI = {
     create: (url) => ipcRenderer.send(IPC.tabCreate, url),
     close: (id) => ipcRenderer.send(IPC.tabClose, id),
     activate: (id) => ipcRenderer.send(IPC.tabActivate, id),
-    move: (id, toIndex) => ipcRenderer.send(IPC.tabMove, id, toIndex),
+    move: (id, toIndex, into) => ipcRenderer.send(IPC.tabMove, id, toIndex, into),
+    moveGroup: (group, toIndex) => ipcRenderer.send(IPC.tabMoveGroup, group, toIndex),
+    peekGroup: (group, anchor) => ipcRenderer.send(IPC.tabPeekGroup, group, anchor),
+    unpeekGroup: (now) => ipcRenderer.send(IPC.tabUnpeekGroup, now),
+    groupMenu: (group) => ipcRenderer.send(IPC.tabGroupMenu, group),
     contextMenu: (id) => ipcRenderer.send(IPC.tabContextMenu, id),
     toggleMute: (id) => ipcRenderer.send(IPC.tabToggleMute, id)
   },
@@ -23,13 +27,16 @@ const api: BrowserrAPI = {
     forward: () => ipcRenderer.send(IPC.navForward),
     reload: () => ipcRenderer.send(IPC.navReload),
     stop: () => ipcRenderer.send(IPC.navStop),
-    resetZoom: () => ipcRenderer.send(IPC.zoomReset)
+    resetZoom: () => ipcRenderer.send(IPC.zoomReset),
+    pasteAndGo: () => ipcRenderer.send(IPC.pasteAndGo)
   },
   onWindowState: (cb) => on(IPC.windowState, cb),
   onCommand: (cb) => on(IPC.command, cb),
   setInsets: (insets) => ipcRenderer.send(IPC.setInsets, insets),
   siteInfoMenu: () => ipcRenderer.send(IPC.siteInfoMenu),
   appMenu: (x, y) => ipcRenderer.send(IPC.appMenu, x, y),
+  tabLayoutMenu: (x, y) => ipcRenderer.send(IPC.tabLayoutMenu, x, y),
+  showMenu: (items) => ipcRenderer.invoke(IPC.showMenu, items),
   omnibox: {
     query: (text) => ipcRenderer.invoke(IPC.omniboxQuery, text),
     show: (items, selected, rect) => ipcRenderer.send(IPC.omniboxShow, items, selected, rect),
@@ -43,6 +50,7 @@ const api: BrowserrAPI = {
   },
   bookmarks: {
     toggleCurrent: () => ipcRenderer.send(IPC.bookmarkToggle),
+    toggle: (url, title) => ipcRenderer.send(IPC.bookmarkToggleUrl, url, title),
     list: () => ipcRenderer.invoke(IPC.bookmarksList),
     open: (url, newTab) => ipcRenderer.send(IPC.bookmarkOpen, url, newTab),
     contextMenu: (id) => ipcRenderer.send(IPC.bookmarkContextMenu, id),
@@ -59,19 +67,27 @@ const api: BrowserrAPI = {
     onChanged: (cb) => on(IPC.downloadsChanged, cb)
   },
   share: {
-    openPicker: () => ipcRenderer.send(IPC.shareOpenPicker)
+    openPicker: () => ipcRenderer.send(IPC.shareOpenPicker),
+    preview: (url) => ipcRenderer.invoke(IPC.sharePreview, url),
+    openPickerForLink: (url, title) => ipcRenderer.send(IPC.shareOpenPickerForLink, url, title)
   },
   auth: {
     signInWithGoogle: () => ipcRenderer.invoke(IPC.signInWithGoogle)
   },
+  updates: {
+    get: () => ipcRenderer.invoke(IPC.updateGet),
+    install: () => ipcRenderer.send(IPC.updateInstall),
+    onChanged: (cb) => on(IPC.updateChanged, cb)
+  },
   notify: (n) => ipcRenderer.send(IPC.notify, n),
   setBadge: (count) => ipcRenderer.send(IPC.setBadge, count),
-  openUrl: (url, background) => ipcRenderer.send(IPC.openUrl, url, background),
+  openUrl: (url, background, fromLink) => ipcRenderer.send(IPC.openUrl, url, background, fromLink),
   overlay: {
     onState: (cb) => on(IPC.overlayState, cb),
     pick: (index) => ipcRenderer.send(IPC.overlayPick, index),
     close: () => ipcRenderer.send(IPC.overlayClose),
-    openPanel: (panel) => ipcRenderer.send(IPC.overlayOpenPanel, panel)
+    openPanel: (panel) => ipcRenderer.send(IPC.overlayOpenPanel, panel),
+    peekHover: (inside) => ipcRenderer.send(IPC.overlayPeekHover, inside)
   }
 }
 

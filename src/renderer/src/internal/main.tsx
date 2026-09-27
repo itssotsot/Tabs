@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import '../styles/internal.css'
 import { BookmarksPage } from './BookmarksPage'
 import { ErrorPage } from './ErrorPage'
+import { ExtensionsPage } from './ExtensionsPage'
 import { HistoryPage } from './HistoryPage'
 import { NewTabPage } from './NewTabPage'
 import { SettingsPage } from './SettingsPage'
@@ -12,6 +13,7 @@ const PAGES: Record<string, { title: string; render: () => ReactNode }> = {
   history: { title: 'History', render: () => <HistoryPage /> },
   bookmarks: { title: 'Bookmarks', render: () => <BookmarksPage /> },
   settings: { title: 'Settings', render: () => <SettingsPage /> },
+  extensions: { title: 'Extensions', render: () => <ExtensionsPage /> },
   error: { title: '', render: () => <ErrorPage /> }
 }
 

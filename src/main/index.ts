@@ -3,16 +3,34 @@ import { setAdblockEnabled } from './adblock'
 import { broadcast } from './broadcast'
 import { setupDownloads } from './downloads'
 import { profile, registerInternalProtocol, registerSchemes, webSession } from './env'
+import { setupExtensions } from './extensions'
+import { setupBrowserIdentity } from './identity'
 import { registerIpc } from './ipc'
 import { buildAppMenu } from './menu'
 import { startMemorySaver } from './memory'
 import { setupPermissions } from './permissions'
 import { setupPredictor } from './predictor'
 import { store } from './store'
+import { setupUpdates } from './updater'
 import { BrowserWindowController, controllerFor, focusedController, freezeSession } from './window'
 import { IPC } from '@shared/api'
+import { existsSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 
+/** Tabs used to be called Browserr. The first launch takes over its data, so tabs, history and bookmarks carry on. */
+function adoptBrowserrData(): void {
+  const folder = (name: string): string => join(app.getPath('appData'), profile ? `${name} (${profile})` : name)
+  const from = folder('Browserr')
+  const to = folder(app.getName())
+  if (!existsSync(from) || existsSync(to)) return
+  try {
+    renameSync(from, to)
+  } catch (err) {
+    console.error('[rename] could not move the Browserr data', err)
+  }
+}
+
+adoptBrowserrData()
 if (profile) app.setPath('userData', join(app.getPath('appData'), `${app.getName()} (${profile})`))
 
 registerSchemes()
@@ -36,23 +54,11 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0)
 }
 
-/** A plain Chrome user agent. Google sign-in and some sites reject anything mentioning Electron. */
-function chromeUserAgent(): string {
-  const major = process.versions.chrome.split('.')[0]
-  const platform =
-    process.platform === 'darwin'
-      ? 'Macintosh; Intel Mac OS X 10_15_7'
-      : process.platform === 'win32'
-        ? 'Windows NT 10.0; Win64; x64'
-        : 'X11; Linux x86_64'
-  return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
-}
-
 function urlsFromArgv(argv: string[]): string[] {
   return argv.filter((a) => /^https?:\/\//i.test(a))
 }
 
-// Links opened from other apps (when Browserr is the default browser).
+// Links opened from other apps (when Tabs is the default browser).
 const pendingUrls: string[] = urlsFromArgv(process.argv)
 let ready = false
 
@@ -111,10 +117,8 @@ app.whenReady().then(async () => {
   await waitForWidevine()
   store.init()
 
-  const userAgent = chromeUserAgent()
-  app.userAgentFallback = userAgent
   const ses = webSession()
-  ses.setUserAgent(userAgent)
+  setupBrowserIdentity(ses)
 
   registerInternalProtocol()
   setupPermissions(ses, windowFor)
@@ -122,9 +126,11 @@ app.whenReady().then(async () => {
   void setAdblockEnabled(ses, store.settings.adblock)
   setupPredictor(ses)
   startMemorySaver()
+  await setupExtensions(ses)
 
   registerIpc()
   buildAppMenu()
+  setupUpdates((update) => broadcast(IPC.updateChanged, update))
 
   ready = true
   openInitialWindows()

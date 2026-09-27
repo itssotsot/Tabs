@@ -2,7 +2,8 @@ import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Bookmark, HistoryEntry, Settings } from '@shared/types'
+import { TAB_LAYOUTS } from '@shared/constants'
+import type { Bookmark, HistoryEntry, Settings, TabLink } from '@shared/types'
 
 /** A JSON file loaded once at startup and written back shortly after each change. */
 class JsonFile<T> {
@@ -45,6 +46,10 @@ export interface SavedTab {
   /** Back/forward list (without page state), so history survives a restart. */
   entries?: { url: string; title: string }[]
   index?: number
+  fromLink?: TabLink
+  createdAt?: number
+  /** Another site's group the tab was dragged into. */
+  joinedGroup?: string
 }
 
 /** Page host -> origins its pages load from -> how often. Used to preconnect. */
@@ -63,10 +68,15 @@ export const DEFAULT_SETTINGS: Settings = {
   searchEngine: 'google',
   adblock: true,
   notifications: true,
-  showBookmarksBar: true,
   restoreSession: true,
-  memorySaver: true
+  memorySaver: true,
+  tabLayout: 'vertical',
+  groupTabsBySite: true,
+  ungroupedSites: []
 }
+
+/** Site names learned from pages; the oldest go first past this. */
+const SITE_NAMES_LIMIT = 500
 
 class Stores {
   private history!: JsonFile<{ entries: Record<string, HistoryEntry> }>
@@ -75,19 +85,25 @@ class Stores {
   private sessionFile!: JsonFile<{ windows: SavedWindow[] }>
   private permissionsFile!: JsonFile<{ sites: Record<string, Record<string, PermissionDecision>> }>
   private predictorFile!: JsonFile<{ hosts: PredictorData }>
+  private sitesFile!: JsonFile<{ names: Record<string, string>; colors: Record<string, string> }>
+  private extensionsFile!: JsonFile<{ disabled: string[] }>
 
   /** Must run after `app.whenReady()` so userData is final. */
   init(): void {
     this.history = new JsonFile('history', { entries: {} })
     this.bookmarksFile = new JsonFile('bookmarks', { items: [] })
     this.settingsFile = new JsonFile('settings', DEFAULT_SETTINGS)
+    // Settings saved with a layout that's since been removed.
+    if (!TAB_LAYOUTS.some((l) => l.id === this.settingsFile.data.tabLayout)) this.settingsFile.data.tabLayout = DEFAULT_SETTINGS.tabLayout
     this.sessionFile = new JsonFile('session', { windows: [] })
     this.permissionsFile = new JsonFile('permissions', { sites: {} })
     this.predictorFile = new JsonFile('predictor', { hosts: {} })
+    this.sitesFile = new JsonFile('sites', { names: {}, colors: {} })
+    this.extensionsFile = new JsonFile('extensions', { disabled: [] })
   }
 
   flushAll(): void {
-    for (const f of [this.history, this.bookmarksFile, this.settingsFile, this.sessionFile, this.permissionsFile, this.predictorFile]) {
+    for (const f of [this.history, this.bookmarksFile, this.settingsFile, this.sessionFile, this.permissionsFile, this.predictorFile, this.sitesFile, this.extensionsFile]) {
       f.flush()
     }
   }
@@ -192,6 +208,8 @@ class Stores {
     this.history.save()
     this.predictorFile.data.hosts = {}
     this.predictorFile.save()
+    this.sitesFile.data.names = {}
+    this.sitesFile.save()
   }
 
   // Bookmarks
@@ -233,6 +251,18 @@ class Stores {
     return this.settingsFile.data
   }
 
+  // Extensions
+
+  /** IDs of installed extensions that are turned off. */
+  get disabledExtensions(): string[] {
+    return this.extensionsFile.data.disabled
+  }
+
+  setDisabledExtensions(ids: string[]): void {
+    this.extensionsFile.data.disabled = [...new Set(ids)]
+    this.extensionsFile.save()
+  }
+
   // Session
 
   get savedWindows(): SavedWindow[] {
@@ -252,6 +282,34 @@ class Stores {
 
   savePredictor(): void {
     this.predictorFile.save()
+  }
+
+  // Site names (for tab groups)
+
+  siteName(site: string): string | undefined {
+    return this.sitesFile.data.names[site]
+  }
+
+  setSiteName(site: string, name: string): void {
+    const names = this.sitesFile.data.names
+    delete names[site]
+    names[site] = name
+    const keys = Object.keys(names)
+    for (const key of keys.slice(0, Math.max(0, keys.length - SITE_NAMES_LIMIT))) delete names[key]
+    this.sitesFile.save()
+  }
+
+  // Site colors (picked for tab groups; kept when history is cleared)
+
+  siteColor(site: string): string | undefined {
+    return this.sitesFile.data.colors[site]
+  }
+
+  /** Null goes back to the automatic color. */
+  setSiteColor(site: string, color: string | null): void {
+    if (color) this.sitesFile.data.colors[site] = color
+    else delete this.sitesFile.data.colors[site]
+    this.sitesFile.save()
   }
 
   // Site permissions

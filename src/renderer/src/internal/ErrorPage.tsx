@@ -17,9 +17,9 @@ function explain(code: string, host: string): Explanation {
   if (n === -105) return { icon: CloudOff, title: 'This site can’t be reached', detail: `${host}’s server IP address could not be found.` }
   if (n === -102) return { icon: CloudOff, title: 'This site can’t be reached', detail: `${host} refused to connect.` }
   if (n === -118 || n === -7) return { icon: CloudOff, title: 'This site can’t be reached', detail: `${host} took too long to respond.` }
-  if (n === -20) return { icon: ShieldX, title: 'Blocked', detail: `Browserr's ad and tracker blocker stopped ${host} from loading. You can turn blocking off in Settings.` }
+  if (n === -20) return { icon: ShieldX, title: 'Blocked', detail: `The ad and tracker blocker stopped ${host} from loading. You can turn blocking off in Settings.` }
   if (n <= -200 && n > -300) {
-    return { icon: ShieldAlert, title: 'Your connection is not private', detail: `The certificate for ${host} isn't valid, so Browserr stopped the connection to protect you.` }
+    return { icon: ShieldAlert, title: 'Your connection is not private', detail: `The certificate for ${host} isn't valid, so Tabs stopped the connection to protect you.` }
   }
   return { icon: CloudOff, title: 'This page isn’t working', detail: `${host} couldn't be loaded.` }
 }

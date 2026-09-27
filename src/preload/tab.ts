@@ -4,9 +4,15 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type InternalAPI } from '@shared/api'
 import { INTERNAL_SCHEME } from '@shared/url'
 import { installCosmeticFiltering } from './cosmetics'
+import { installSharedLinkGuard } from './links'
+import { installBackgroundMediaHold } from './media'
 import { installYouTubeAdBlocking } from './youtube'
 
-if (/^https?:$/.test(location.protocol)) installCosmeticFiltering()
+if (/^https?:$/.test(location.protocol)) {
+  installBackgroundMediaHold()
+  installCosmeticFiltering()
+  if (window.top === window) installSharedLinkGuard()
+}
 
 if (location.protocol === `${INTERNAL_SCHEME}:`) {
   const api: InternalAPI = {
@@ -21,7 +27,12 @@ if (location.protocol === `${INTERNAL_SCHEME}:`) {
     setSettings: (patch) => ipcRenderer.invoke(IPC.internalSettingsSet, patch),
     clearBrowsingData: () => ipcRenderer.invoke(IPC.internalClearData),
     appInfo: () => ipcRenderer.invoke(IPC.internalAppInfo),
-    makeDefaultBrowser: () => ipcRenderer.invoke(IPC.internalMakeDefault)
+    makeDefaultBrowser: () => ipcRenderer.invoke(IPC.internalMakeDefault),
+    extensions: () => ipcRenderer.invoke(IPC.internalExtensions),
+    setExtensionEnabled: (id, enabled) => ipcRenderer.invoke(IPC.internalExtensionSetEnabled, id, enabled),
+    removeExtension: (id) => ipcRenderer.invoke(IPC.internalExtensionRemove, id),
+    openExtensionOptions: (id) => ipcRenderer.invoke(IPC.internalExtensionOptions, id),
+    openWebStore: () => ipcRenderer.invoke(IPC.internalOpenWebStore)
   }
   contextBridge.exposeInMainWorld('browserrInternal', api)
 }

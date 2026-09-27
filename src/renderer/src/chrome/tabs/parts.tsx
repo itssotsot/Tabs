@@ -1,0 +1,383 @@
+import { Globe, PanelsTopLeft, Plus, Star, Volume2, VolumeX, X } from 'lucide-react'
+import { useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { TAB_LAYOUTS } from '@shared/constants'
+import type { TabLayout, TabState, WindowState } from '@shared/types'
+import { hostOf } from '@shared/url'
+import { displayName, roomTitle, useSocial } from '../../social/SocialProvider'
+import { Avatar } from '../../ui/Avatar'
+import { copyText, MENU_SEPARATOR, popupMenu } from '../../ui/menu'
+import { cx, shortcut, siteIcon, timeAgo } from '../../ui/util'
+import { useLinks, type SharedLink } from './links'
+
+export function TabIcon({ tab }: { tab: TabState }): ReactNode {
+  const [broken, setBroken] = useState<string | null>(null)
+  if (tab.loading) return <span className="spinner" />
+  if (tab.favicon && broken !== tab.favicon) {
+    return <img className="favicon" src={tab.favicon} alt="" draggable={false} onError={() => setBroken(tab.favicon)} />
+  }
+  return <Globe className="favicon" size={15} strokeWidth={1.75} />
+}
+
+/** A site icon with the face of whoever sent the link in the corner, for links from two-person chats. */
+export function LinkIcon({ url, link, favicon }: { url: string; link?: SharedLink; favicon?: ReactNode }): ReactNode {
+  const { people } = useSocial()
+  const [broken, setBroken] = useState(false)
+  return (
+    <span className="link-icon">
+      {favicon ??
+        (broken ? (
+          <Globe className="favicon" size={15} strokeWidth={1.75} />
+        ) : (
+          <img className="favicon" src={siteIcon(url)} alt="" draggable={false} onError={() => setBroken(true)} />
+        ))}
+      {link && link.oneOnOne && !link.mine && (
+        <span className="link-icon-face">
+          <Avatar profile={people[link.from]} size={12} />
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** useState that survives restarts (per window UI, saved in localStorage). */
+export function useStoredState<T>(key: string, initial: T): [T, (value: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key)
+      return raw === null ? initial : (JSON.parse(raw) as T)
+    } catch {
+      return initial
+    }
+  })
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(value))
+  }, [key, value])
+  return [value, setValue]
+}
+
+/** Right-click menu for a link from a chat (or a favorite) that isn't open as a tab. */
+export function useLinkMenu(): (url: string, title: string, options?: { link?: SharedLink; onArchive?: () => void; onRestore?: () => void }) => void {
+  const { open, isFavorite, toggleFavorite } = useLinks()
+  return (url, title, { link, onArchive, onRestore } = {}) =>
+    void popupMenu([
+      { label: 'Open', run: () => open(url, { link }) },
+      { label: 'Open in a new tab', run: () => open(url, { background: true, link }) },
+      MENU_SEPARATOR,
+      { label: 'Send to a Friend…', run: () => window.browserr.share.openPickerForLink(url, title) },
+      { label: 'Copy link address', run: () => copyText(url) },
+      { label: 'Copy Title', run: () => copyText(title) },
+      MENU_SEPARATOR,
+      { label: isFavorite(url) ? 'Remove from Favorites' : 'Add to Favorites', run: () => toggleFavorite(url, title) },
+      ...(onArchive ? [{ label: 'Archive', run: onArchive }] : []),
+      ...(onRestore ? [{ label: 'Put Back in the Group', run: onRestore }] : [])
+    ])
+}
+
+/** "@alex in Book club · 2h" */
+export function useLinkCaption(): (link: SharedLink) => string {
+  const { user, rooms, people } = useSocial()
+  return (link) => {
+    const room = rooms.find((r) => r.id === link.roomId)
+    const who = link.mine ? 'You' : displayName(people[link.from])
+    const where = room && room.kind === 'group' && user ? ` in ${roomTitle(room, user.uid, people)}` : ''
+    return `${who}${where} · ${timeAgo(link.createdAt)}`
+  }
+}
+
+export function linkTooltip(link: SharedLink, caption: string): string {
+  return `${link.title}\n${hostOf(link.url)}\n${caption}`
+}
+
+export function StarButton({ url, title, className }: { url: string; title: string; className?: string }): ReactNode {
+  const { isFavorite, toggleFavorite } = useLinks()
+  const on = isFavorite(url)
+  return (
+    <button
+      className={cx('star-btn', on && 'on', className)}
+      title={on ? 'Remove from favorites' : 'Add to favorites'}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation()
+        toggleFavorite(url, title)
+      }}
+    >
+      <Star size={13} fill={on ? 'currentColor' : 'none'} />
+    </button>
+  )
+}
+
+// One clock for every tab's age, ticking each minute.
+const MINUTE_MS = 60_000
+const minuteListeners = new Set<() => void>()
+let minuteNow = Date.now()
+let minuteTimer: number | undefined
+
+function subscribeMinute(listener: () => void): () => void {
+  minuteListeners.add(listener)
+  if (minuteTimer === undefined) minuteNow = Date.now()
+  minuteTimer ??= window.setInterval(() => {
+    minuteNow = Date.now()
+    minuteListeners.forEach((l) => l())
+  }, MINUTE_MS)
+  return () => {
+    minuteListeners.delete(listener)
+    if (!minuteListeners.size) {
+      window.clearInterval(minuteTimer)
+      minuteTimer = undefined
+    }
+  }
+}
+
+/** The time, updated once a minute. */
+function useMinute(): number {
+  return useSyncExternalStore(subscribeMinute, () => minuteNow)
+}
+
+/** How long ago a tab was opened (or its link sent), short enough for the strip: now, 5m, 2h, 3d. */
+function tabAge(since: number, now: number): string {
+  const min = Math.floor(Math.max(0, now - since) / MINUTE_MS)
+  if (min < 1) return 'now'
+  if (min < 60) return `${min}m`
+  const hours = Math.floor(min / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`
+}
+
+function formatWhen(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+interface TabItemProps {
+  tab: TabState
+  /** The tab's position in the window, for drag and drop. */
+  index: number
+  active: boolean
+  dragging: boolean
+  onDragStart: () => void
+  onDrop: (index: number) => void
+  /** Show who sent the page, when it came from a chat. */
+  showSender?: boolean
+  /** Group color, for tabs in a chat's or a site's group. */
+  color?: string
+  className?: string
+  /** What × does, when it's more than closing the tab. */
+  onClose?: () => void
+  closeTitle?: string
+}
+
+export function TabItem({ tab, index, active, dragging, onDragStart, onDrop, showSender, color, className, onClose, closeTitle }: TabItemProps): ReactNode {
+  const { tabs } = window.browserr
+  const { linkForTab } = useLinks()
+  const now = useMinute()
+  const chatLink = linkForTab(tab)
+  const link = showSender ? chatLink : undefined
+  // A tab opened from a chat counts from when the link was sent, not when you opened it.
+  const since = chatLink ? (chatLink.createdAt?.getTime() ?? now) : tab.createdAt
+  const opened = chatLink ? `${chatLink.mine ? 'Sent' : 'Received'} ${formatWhen(since)}` : `Opened ${formatWhen(since)}`
+  const style = color ? ({ '--group': color } as CSSProperties) : undefined
+  return (
+    <div
+      role="tab"
+      aria-selected={active}
+      title={tab.url ? `${tab.title}\n${tab.url}\n${opened}${tab.sleeping ? '\nSleeping to save memory' : ''}` : `${tab.title}\n${opened}`}
+      className={cx('tab', active && 'active', tab.pinned && 'pinned', dragging && 'dragging', tab.sleeping && 'sleeping', color && 'grouped', className)}
+      style={style}
+      data-tab-id={tab.id}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move'
+        onDragStart()
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault()
+        onDrop(index)
+      }}
+      onMouseDown={(e) => {
+        if (e.button === 0) tabs.activate(tab.id)
+      }}
+      onAuxClick={(e) => {
+        if (e.button === 1) tabs.close(tab.id)
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        tabs.contextMenu(tab.id)
+      }}
+    >
+      {link ? <LinkIcon url={tab.url} link={link} favicon={<TabIcon tab={tab} />} /> : <TabIcon tab={tab} />}
+      {!tab.pinned && <span className="tab-title">{tab.title}</span>}
+      {!tab.pinned && <span className="tab-age">{tabAge(since, now)}</span>}
+      {(tab.audible || tab.muted) && (
+        <button
+          className="tab-audio"
+          title={tab.muted ? 'Unmute tab' : 'Mute tab'}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => tabs.toggleMute(tab.id)}
+        >
+          {tab.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+        </button>
+      )}
+      {!tab.pinned && (
+        <button
+          className="tab-close"
+          title={closeTitle ?? `Close tab (${shortcut('⌘W', 'Ctrl+W')})`}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => (onClose ? onClose() : tabs.close(tab.id))}
+        >
+          <X size={13} strokeWidth={2.25} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+export interface TabDrag {
+  dragId: number | null
+  /** The site group being dragged by its chip. */
+  dragGroup: string | null
+  itemProps: (tab: TabState) => Pick<TabItemProps, 'dragging' | 'onDragStart' | 'onDrop'>
+  /** Drag a whole site group by its chip. */
+  startGroup: (group: string) => void
+  /** Something dropped at `to` (a tab's position in the window). */
+  drop: (to: number) => void
+  end: () => void
+}
+
+/** Drag-and-drop state shared by a list of TabItems (and site group chips). */
+export function useTabDrag(): TabDrag {
+  const [dragId, setDragId] = useState<number | null>(null)
+  const [dragGroup, setDragGroup] = useState<string | null>(null)
+  const end = (): void => {
+    setDragId(null)
+    setDragGroup(null)
+  }
+  const drop = (to: number): void => {
+    if (dragId !== null) window.browserr.tabs.move(dragId, to)
+    else if (dragGroup !== null) window.browserr.tabs.moveGroup(dragGroup, to)
+    end()
+  }
+  return {
+    dragId,
+    dragGroup,
+    end,
+    drop,
+    startGroup: (group) => {
+      setDragId(null)
+      setDragGroup(group)
+    },
+    itemProps: (tab) => ({
+      dragging: tab.id === dragId,
+      onDragStart: () => {
+        setDragGroup(null)
+        setDragId(tab.id)
+      },
+      onDrop: drop
+    })
+  }
+}
+
+interface LinkTabProps {
+  url: string
+  title: string
+  /** Whose face to show on the icon. */
+  sender?: SharedLink
+  tooltip: string
+  onOpen: (background: boolean) => void
+  /** Shows an × that calls this. */
+  onDismiss?: () => void
+  dismissTitle?: string
+  /** When the link was sent, for links from a chat. Shown like a tab's age. */
+  sentAt?: Date | null
+  color?: string
+  className?: string
+  onContextMenu?: () => void
+}
+
+/** A page that isn't open yet, drawn like a sleeping tab. Clicking it opens it. */
+export function LinkTab({ url, title, sender, tooltip, onOpen, onDismiss, dismissTitle, sentAt, color, className, onContextMenu }: LinkTabProps): ReactNode {
+  const linkMenu = useLinkMenu()
+  const now = useMinute()
+  const style = color ? ({ '--group': color } as CSSProperties) : undefined
+  return (
+    <div
+      role="tab"
+      aria-selected={false}
+      title={tooltip}
+      className={cx('tab', 'link-tab', color && 'grouped', className)}
+      style={style}
+      onMouseDown={(e) => {
+        if (e.button === 0) onOpen(e.metaKey || e.ctrlKey)
+      }}
+      onAuxClick={(e) => {
+        if (e.button === 1) onOpen(true)
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        if (onContextMenu) onContextMenu()
+        else linkMenu(url, title)
+      }}
+    >
+      <LinkIcon url={url} link={sender} />
+      <span className="tab-title">{title}</span>
+      {/* Pending messages have no server time yet; they're brand new. */}
+      {sentAt !== undefined && <span className="tab-age">{tabAge(sentAt?.getTime() ?? now, now)}</span>}
+      <StarButton url={url} title={title} className="tab-star" />
+      {onDismiss && (
+        <button
+          className="tab-close"
+          title={dismissTitle ?? 'Dismiss'}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDismiss()
+          }}
+        >
+          <X size={13} strokeWidth={2.25} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+export function NewTabButton(): ReactNode {
+  return (
+    <button className="icon-btn newtab-btn" title={`New tab (${shortcut('⌘T', 'Ctrl+T')})`} onClick={() => window.browserr.tabs.create()}>
+      <Plus size={16} />
+    </button>
+  )
+}
+
+export function LayoutButton({ layout }: { layout: TabLayout }): ReactNode {
+  const name = TAB_LAYOUTS.find((l) => l.id === layout)?.name ?? 'Tab layout'
+  return (
+    <button
+      className="icon-btn small layout-btn"
+      title={`Tab layout: ${name}`}
+      onClick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect()
+        window.browserr.tabLayoutMenu(r.left, r.bottom + 4)
+      }}
+    >
+      <PanelsTopLeft size={15} />
+    </button>
+  )
+}
+
+/** The draggable top row: room for the window controls, the tabs, and the layout picker. */
+export function StripFrame({ state, layout, children }: { state: WindowState; layout: TabLayout; children: ReactNode }): ReactNode {
+  const { platform } = window.browserr
+  const leftPad = platform === 'darwin' && !state.fullscreen ? 80 : 8
+  const rightPad = platform === 'darwin' ? 8 : 146
+  return (
+    <div className="tabstrip" style={{ paddingLeft: leftPad, paddingRight: rightPad }}>
+      {children}
+      <LayoutButton layout={layout} />
+      {state.profile && (
+        <span className="profile-chip" title={`Profile: ${state.profile}`}>
+          {state.profile}
+        </span>
+      )}
+    </div>
+  )
+}

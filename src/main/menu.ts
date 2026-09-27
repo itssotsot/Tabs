@@ -1,9 +1,15 @@
-import { app, clipboard, dialog, Menu, shell, type ContextMenuParams, type MenuItemConstructorOptions } from 'electron'
+import { app, clipboard, dialog, Menu, nativeImage, shell, type ContextMenuParams, type MenuItemConstructorOptions, type NativeImage, type WebContents } from 'electron'
+import { MENU_ROLES, type MenuSpec } from '@shared/api'
+import { GROUP_COLORS } from '@shared/colors'
+import { TAB_LAYOUTS } from '@shared/constants'
+import type { TabLayout } from '@shared/types'
 import { INTERNAL_SCHEME, looksLikeUrl, searchUrl, SEARCH_ENGINE_NAMES, toNavigableUrl } from '@shared/url'
 import { bookmarksChanged, settingsChanged, toggleBookmark } from './broadcast'
 import { draftFromLink } from './share'
+import { siteColor, siteName } from './sites'
 import { store } from './store'
 import type { Tab } from './tab'
+import { checkForUpdatesNow, installUpdate, pendingUpdate } from './updater'
 import { BrowserWindowController, focusedController } from './window'
 
 const isMac = process.platform === 'darwin'
@@ -39,6 +45,22 @@ function compact(items: (Item | false | null | undefined)[]): Item[] {
 
 const separator: Item = { type: 'separator' }
 
+function setTabLayout(layout: TabLayout): void {
+  store.updateSettings({ tabLayout: layout })
+  settingsChanged()
+}
+
+/** One radio item per tab layout, with ⌥⌘1… to flip between them quickly. */
+function tabLayoutItems(): Item[] {
+  return TAB_LAYOUTS.map((l, i) => ({
+    label: l.name,
+    type: 'radio',
+    accelerator: `CmdOrCtrl+Alt+${i + 1}`,
+    checked: store.settings.tabLayout === l.id,
+    click: () => setTabLayout(l.id)
+  }))
+}
+
 // ---- application menu (also provides the keyboard shortcuts) ----
 
 export function buildAppMenu(): void {
@@ -53,6 +75,7 @@ export function buildAppMenu(): void {
       label: app.name,
       submenu: [
         { role: 'about' },
+        { label: 'Check for Updates…', click: () => void checkForUpdatesNow() },
         separator,
         { label: 'Settings…', accelerator: 'Cmd+,', click: internal('settings') },
         separator,
@@ -80,6 +103,7 @@ export function buildAppMenu(): void {
         { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: withTab((tab) => tab.wc.print()) },
         !isMac && separator,
         !isMac && { label: 'Settings', click: internal('settings') },
+        !isMac && { label: 'Check for Updates…', click: () => void checkForUpdatesNow() },
         !isMac && { role: 'quit', label: 'Exit' }
       ])
     },
@@ -121,20 +145,11 @@ export function buildAppMenu(): void {
         { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: withTab((tab) => tab.zoom('reset')) },
         separator,
         {
-          label: 'Show Links Sidebar',
+          label: 'Show Inbox',
           accelerator: 'CmdOrCtrl+Shift+L',
           click: withWindow((c) => c.sendCommand({ type: 'toggle-sidebar', panel: 'inbox' }))
         },
-        {
-          label: 'Always Show Bookmarks Bar',
-          accelerator: 'CmdOrCtrl+Shift+B',
-          type: 'checkbox',
-          checked: store.settings.showBookmarksBar,
-          click: () => {
-            store.updateSettings({ showBookmarksBar: !store.settings.showBookmarksBar })
-            settingsChanged()
-          }
-        },
+        { label: 'Tab Layout', submenu: tabLayoutItems() },
         { role: 'togglefullscreen' },
         separator,
         {
@@ -184,9 +199,20 @@ export function buildAppMenu(): void {
         { role: 'minimize' },
         isMac && { role: 'zoom' },
         separator,
+        {
+          label: 'Search tabs and links…',
+          accelerator: 'CmdOrCtrl+Shift+A',
+          click: withWindow((c) => {
+            // Typing goes to the search box, not the page.
+            c.win.webContents.focus()
+            c.sendCommand({ type: 'toggle-tab-overview' })
+          })
+        },
         { label: 'Next Tab', accelerator: isMac ? 'Cmd+Alt+Right' : 'Ctrl+Tab', click: withWindow((c) => c.cycleTab(1)) },
         { label: 'Previous Tab', accelerator: isMac ? 'Cmd+Alt+Left' : 'Ctrl+Shift+Tab', click: withWindow((c) => c.cycleTab(-1)) },
         ...tabShortcuts,
+        separator,
+        { label: 'Extensions', click: internal('extensions') },
         isMac && separator,
         isMac && { role: 'front' }
       ])
@@ -237,17 +263,17 @@ export function showPageContextMenu(c: BrowserWindowController, tab: Tab, p: Con
     // Links
     ...(p.linkURL
       ? ([
-          { label: 'Open Link in New Tab', click: () => openInBackground(p.linkURL) },
-          { label: 'Open Link in New Window', click: () => new BrowserWindowController({ urls: [p.linkURL] }) },
+          { label: 'Open link in a new tab', click: () => openInBackground(p.linkURL) },
+          { label: 'Open link in a new window', click: () => new BrowserWindowController({ urls: [p.linkURL] }) },
           separator,
           /^https?:/.test(p.linkURL) && {
-            label: 'Send Link to a Friend…',
+            label: 'Send link to a friend…',
             click: () => {
               const draft = draftFromLink(p.linkURL, p.linkText)
               if (draft) c.openSendPicker(draft)
             }
           },
-          { label: 'Copy Link Address', click: () => clipboard.writeText(p.linkURL) },
+          { label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) },
           separator
         ] as (Item | false)[])
       : []),
@@ -334,27 +360,190 @@ function truncate(text: string, max: number): string {
   return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine
 }
 
+// ---- right-click in the browser UI itself (address bar, chat, sidebar) ----
+
+/** Text fields, selected text and links anywhere in the browser UI. Places with more to offer show their own menu. */
+export function showChromeContextMenu(c: BrowserWindowController, wc: WebContents, p: ContextMenuParams): void {
+  const engine = store.settings.searchEngine
+  const selection = p.selectionText.trim()
+  const web = /^https?:/.test(p.linkURL)
+  const items = compact([
+    ...(web
+      ? ([
+          { label: 'Open link', click: () => c.createTab(p.linkURL, { active: true }) },
+          { label: 'Open link in a new tab', click: () => c.createTab(p.linkURL, { active: false }) },
+          { label: 'Open link in a new window', click: () => new BrowserWindowController({ urls: [p.linkURL] }) },
+          separator,
+          {
+            label: 'Send link to a friend…',
+            click: () => {
+              const draft = draftFromLink(p.linkURL, p.linkText)
+              if (draft) c.openSendPicker(draft)
+            }
+          },
+          { label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) },
+          separator
+        ] as (Item | false)[])
+      : []),
+    ...(p.isEditable
+      ? ([
+          { role: 'undo', enabled: p.editFlags.canUndo },
+          { role: 'redo', enabled: p.editFlags.canRedo },
+          separator,
+          { role: 'cut', enabled: p.editFlags.canCut },
+          { role: 'copy', enabled: p.editFlags.canCopy },
+          { role: 'paste', enabled: p.editFlags.canPaste },
+          { role: 'selectAll', enabled: p.editFlags.canSelectAll }
+        ] as Item[])
+      : []),
+    ...(!p.isEditable && selection
+      ? ([
+          { role: 'copy' },
+          looksLikeUrl(selection)
+            ? { label: `Go to ${truncate(selection, 30)}`, click: () => c.createTab(toNavigableUrl(selection, engine)) }
+            : { label: `Search ${SEARCH_ENGINE_NAMES[engine]} for “${truncate(selection, 30)}”`, click: () => c.createTab(searchUrl(selection, engine)) }
+        ] as Item[])
+      : []),
+    separator,
+    !app.isPackaged && {
+      label: 'Inspect Browser UI',
+      click: () => {
+        if (!wc.isDevToolsOpened()) wc.openDevTools({ mode: 'detach' })
+        wc.inspectElement(p.x, p.y)
+      }
+    }
+  ])
+  if (items.length) Menu.buildFromTemplate(items).popup({ window: c.win })
+}
+
+/** A menu the browser UI described (see MenuSpec). Resolves with the clicked item's id, or null if dismissed. */
+export function showRendererMenu(c: BrowserWindowController, specs: unknown): Promise<string | null> {
+  return new Promise((resolve) => {
+    let done = false
+    const finish = (id: string | null): void => {
+      if (done) return
+      done = true
+      resolve(id)
+    }
+    const build = (list: unknown, depth: number): Item[] => {
+      if (!Array.isArray(list) || depth > 2) return []
+      return compact(
+        list.slice(0, 40).map((raw): Item | null => {
+          if (!raw || typeof raw !== 'object') return null
+          const s = raw as MenuSpec
+          if (s.type === 'separator') return separator
+          const enabled = s.enabled !== false
+          if (s.role && MENU_ROLES.includes(s.role)) return { role: s.role, enabled }
+          if (typeof s.label !== 'string') return null
+          const label = truncate(s.label, 80)
+          if (Array.isArray(s.submenu)) return { label, enabled, submenu: build(s.submenu, depth + 1) }
+          const id = typeof s.id === 'string' ? s.id : null
+          return {
+            label,
+            enabled: enabled && !!id,
+            ...(s.type === 'checkbox' ? { type: 'checkbox', checked: !!s.checked } : {}),
+            click: () => finish(id)
+          }
+        })
+      )
+    }
+    const items = build(specs, 0)
+    if (!items.length) return finish(null)
+    // Closing the menu can come just before the click, so wait a moment before calling it dismissed.
+    Menu.buildFromTemplate(items).popup({ window: c.win, callback: () => setTimeout(() => finish(null), 150) })
+  })
+}
+
 // ---- right-click on a tab ----
 
 export function showTabContextMenu(c: BrowserWindowController, tab: Tab): void {
   const muted = tab.muted
+  // The vertical layout lists tabs top to bottom.
+  const after = store.settings.tabLayout === 'vertical' ? 'Below' : 'to the Right'
   Menu.buildFromTemplate(
     compact([
-      { label: 'New Tab to the Right', click: () => c.createTab(undefined, { index: c.indexOf(tab) + 1 }) },
+      { label: `New Tab ${after}`, click: () => c.createTab(undefined, { index: c.indexOf(tab) + 1 }) },
       separator,
       { label: 'Reload', click: () => tab.reload() },
       { label: 'Duplicate', click: () => c.duplicateTab(tab) },
       { label: tab.pinned ? 'Unpin' : 'Pin', click: () => c.setPinned(tab, !tab.pinned) },
+      !!c.groupOf(tab) && { label: 'Remove from Group', click: () => c.removeFromGroup(tab) },
       { label: muted ? 'Unmute Site' : 'Mute Site', click: () => tab.toggleMute() },
       !tab.isInternal && { label: 'Send to a Friend…', click: () => void c.openSendPickerForTab(tab) },
       separator,
       { label: 'Close Tab', click: () => c.closeTab(tab) },
       { label: 'Close Other Tabs', click: () => c.closeOtherTabs(tab) },
-      { label: 'Close Tabs to the Right', click: () => c.closeTabsToRight(tab) },
+      { label: `Close Tabs ${after}`, click: () => c.closeTabsToRight(tab) },
       separator,
       { label: 'Reopen Closed Tab', click: () => c.reopenClosedTab() }
     ])
   ).popup({ window: c.win })
+}
+
+// ---- right-click on a site group's chip ----
+
+const SWATCH_SIZE = 14
+const swatches = new Map<string, NativeImage>()
+
+/** A round dot of `hex` for a menu item, drawn at 2x. */
+function swatch(hex: string): NativeImage {
+  let image = swatches.get(hex)
+  if (image) return image
+  const px = SWATCH_SIZE * 2
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+  const center = px / 2
+  const radius = px / 2 - 2
+  // BGRA with premultiplied alpha, and a soft edge.
+  const buf = Buffer.alloc(px * px * 4)
+  for (let y = 0; y < px; y++) {
+    for (let x = 0; x < px; x++) {
+      const a = Math.max(0, Math.min(1, radius - Math.hypot(x + 0.5 - center, y + 0.5 - center) + 0.5))
+      const i = (y * px + x) * 4
+      buf[i] = Math.round(b * a)
+      buf[i + 1] = Math.round(g * a)
+      buf[i + 2] = Math.round(r * a)
+      buf[i + 3] = Math.round(255 * a)
+    }
+  }
+  image = nativeImage.createFromBitmap(buf, { width: px, height: px, scaleFactor: 2 })
+  swatches.set(hex, image)
+  return image
+}
+
+function setSiteColor(site: string, color: string | null): void {
+  store.setSiteColor(site, color)
+  for (const c of BrowserWindowController.all) c.pushState()
+}
+
+export function showTabGroupMenu(c: BrowserWindowController, site: string): void {
+  if (!c.groupTabs(site).length) return
+  const picked = store.siteColor(site)
+  Menu.buildFromTemplate([
+    { label: 'Send Group to a Friend…', click: () => void c.openSendPickerForTabs(c.groupTabs(site)) },
+    separator,
+    {
+      label: 'Color',
+      icon: swatch(siteColor(site)),
+      submenu: [
+        { label: 'Automatic', type: 'radio', checked: !picked, click: () => setSiteColor(site, null) },
+        separator,
+        ...GROUP_COLORS.map(
+          ({ name, hex }): Item => ({ label: name, icon: swatch(hex), type: 'radio', checked: picked === hex, click: () => setSiteColor(site, hex) })
+        )
+      ]
+    },
+    separator,
+    { label: 'Ungroup', click: () => c.ungroup(site) },
+    {
+      label: `Don't Group ${siteName(site)} Tabs`,
+      click: () => {
+        store.updateSettings({ ungroupedSites: [...new Set([...store.settings.ungroupedSites, site])] })
+        settingsChanged()
+      }
+    },
+    separator,
+    { label: 'Close Group', click: () => c.closeGroup(site) }
+  ]).popup({ window: c.win })
 }
 
 // ---- the lock icon in the address bar ----
@@ -417,6 +606,7 @@ export function showSiteInfoMenu(c: BrowserWindowController): void {
 export function showAppMenu(c: BrowserWindowController, x: number, y: number): void {
   const tab = c.activeTab
   const zoom = tab ? Math.round(tab.wc.getZoomFactor() * 100) : 100
+  const update = pendingUpdate()
   Menu.buildFromTemplate(
     compact([
       { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => c.createTab() },
@@ -428,6 +618,7 @@ export function showAppMenu(c: BrowserWindowController, x: number, y: number): v
       { label: 'History', accelerator: isMac ? 'Cmd+Y' : 'Ctrl+H', click: internal('history') },
       { label: 'Bookmarks', accelerator: 'CmdOrCtrl+Alt+B', click: internal('bookmarks') },
       { label: 'Downloads', click: () => c.sendCommand({ type: 'open-sidebar', panel: 'downloads' }) },
+      { label: 'Extensions', click: internal('extensions') },
       separator,
       tab && { label: `Zoom (${zoom}%)`, enabled: false },
       tab && { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => tab.zoom('in') },
@@ -439,12 +630,31 @@ export function showAppMenu(c: BrowserWindowController, x: number, y: number): v
       tab && { label: 'Developer Tools', click: () => tab.toggleDevTools() },
       separator,
       { label: 'Settings', click: internal('settings') },
-      { label: isMac ? 'Quit Browserr' : 'Exit', click: () => app.quit() }
+      update && { label: `Update to Tabs ${update.version}`, click: () => void installUpdate() },
+      { label: isMac ? 'Quit Tabs' : 'Exit', click: () => app.quit() }
     ])
   ).popup({ window: c.win, x: Math.round(x), y: Math.round(y) })
 }
 
-// ---- right-click on a bookmark in the bookmarks bar ----
+// ---- the tab layout picker in the tab strip ----
+
+export function showTabLayoutMenu(c: BrowserWindowController, x: number, y: number): void {
+  Menu.buildFromTemplate([
+    { label: 'Tab Layout', enabled: false },
+    ...TAB_LAYOUTS.map(
+      (l, i): Item => ({
+        label: l.name,
+        sublabel: l.description,
+        type: 'radio',
+        accelerator: `CmdOrCtrl+Alt+${i + 1}`,
+        checked: store.settings.tabLayout === l.id,
+        click: () => setTabLayout(l.id)
+      })
+    )
+  ]).popup({ window: c.win, x: Math.round(x), y: Math.round(y) })
+}
+
+// ---- right-click on a favorite ----
 
 export function showBookmarkContextMenu(c: BrowserWindowController, id: string): void {
   const bookmark = store.bookmarks.find((b) => b.id === id)

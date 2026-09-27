@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "browserr-share"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

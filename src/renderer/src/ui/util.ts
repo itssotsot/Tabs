@@ -35,3 +35,13 @@ export function formatBytes(bytes: number): string {
 export function shortcut(mac: string, other: string): string {
   return window.browserr?.platform === 'darwin' ? mac : other
 }
+
+/**
+ * Windows starts autoscroll when the middle button goes down over a scrollable list, which
+ * swallows the middle-click that closes or opens a tab. auxclick still fires after this.
+ */
+export function disableMiddleClickAutoscroll(): void {
+  document.addEventListener('mousedown', (e) => {
+    if (e.button === 1) e.preventDefault()
+  })
+}

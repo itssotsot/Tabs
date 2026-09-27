@@ -371,6 +371,56 @@ kbd {
   color: var(--text);
 }
 
+/* ---------- extensions ---------- */
+
+.page-note {
+  margin: -8px 0 20px;
+  color: var(--muted);
+}
+
+.extension {
+  justify-content: flex-start;
+  gap: 14px;
+}
+
+.extension .setting-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.extension-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+}
+
+.setting-text .extension-version {
+  margin-left: 4px;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.setting-text .extension-error {
+  color: var(--danger);
+}
+
+.extension-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.extension-actions .switch {
+  margin-left: 8px;
+}
+
+.extension:hover .row-remove {
+  opacity: 1;
+}
+
 /* ---------- settings ---------- */
 
 .setting {
@@ -400,6 +450,28 @@ kbd {
 .setting-text span {
   color: var(--muted);
   font-size: 13px;
+}
+
+.setting-text .site-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.site-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  font-size: 12px;
+}
+
+.site-chip:hover {
+  background: var(--hover);
 }
 
 select {

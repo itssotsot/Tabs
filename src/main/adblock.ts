@@ -30,30 +30,49 @@ function hash(text: string): string {
   return (h >>> 0).toString(36)
 }
 
+/** Scriptlets that configure uBlock's shared helpers; they have to run before the rest. */
+const isConfigScriptlet = (code: string): boolean => code.includes('function proxyApplyConfig(')
+
 /**
- * The library can ask for the same page's scriptlets more than once. Running uBlock's
- * helpers twice makes them wrap Function.prototype.toString twice, which then recurses
- * forever (a classic ad-blocker tell that sites detect). Guard each script so it runs
- * at most once per document.
+ * Runs a page's scriptlets the way uBlock Origin does: once, together, in one private scope.
+ *
+ * The library injects each scriptlet as its own script, and each carries its own copy of
+ * uBlock's helpers as global functions. Every copy then wraps Function.prototype.toString
+ * again, and site-specific settings (like X's `skipToString`) never reach the copies that
+ * matter. The stacked wrappers recurse forever, which breaks sites that inspect functions
+ * (X's login) and is a classic ad-blocker tell. In one scope the helpers are shared, and
+ * nothing leaks into the page's globals. The library can also ask for the same page's
+ * scriptlets more than once, so each bundle runs at most once per document.
  */
 function injectScriptletsOncePerPage(b: ElectronBlocker): void {
   const original = b.onInjectCosmeticFilters
-  b.onInjectCosmeticFilters = (event, url, msg) => {
+  b.onInjectCosmeticFilters = async (event, url, msg) => {
+    const scripts: string[] = []
     const sender = new Proxy(event.sender, {
       get(target, prop) {
         if (prop === 'executeJavaScript') {
-          return (code: string, userGesture?: boolean) => {
-            const guarded =
-              `if (!(window[Symbol.for('browserr.scriptlets')] ??= new Set()).has('${hash(code)}')) {` +
-              `window[Symbol.for('browserr.scriptlets')].add('${hash(code)}');\n${code}\n}`
-            return target.executeJavaScript(guarded, userGesture).catch(() => {})
+          return (code: string) => {
+            scripts.push(code)
+            return Promise.resolve()
           }
         }
         const value = Reflect.get(target, prop)
         return typeof value === 'function' ? value.bind(target) : value
       }
     })
-    return original({ ...event, sender } as typeof event, url, msg)
+    // The library calls executeJavaScript synchronously, once per scriptlet.
+    await original({ ...event, sender } as typeof event, url, msg)
+    if (!scripts.length || event.sender.isDestroyed()) return
+
+    scripts.sort((a, c) => Number(isConfigScriptlet(c)) - Number(isConfigScriptlet(a)))
+    // Plain concatenation, no per-script blocks: a function declared inside a block would
+    // get a fresh copy each time, which is exactly the problem.
+    const body = scripts.join('\n;\n')
+    const key = hash(body)
+    const bundle =
+      `if (!(window[Symbol.for('browserr.scriptlets')] ??= new Set()).has('${key}')) {` +
+      `window[Symbol.for('browserr.scriptlets')].add('${key}');\n(function () {\n${body}\n})();\n}`
+    event.sender.executeJavaScript(bundle, true).catch(() => {})
   }
 }
 

@@ -42,10 +42,10 @@ export function SignInCard(): ReactNode {
       <div className="onboarding-icon">
         <Send size={26} />
       </div>
-      <h2>Send links to friends, instantly</h2>
+      <h2>Chat and send links to friends</h2>
       <p>
-        Press <kbd>{shortcut('⌘⇧S', 'Ctrl+Shift+S')}</kbd> on any page (or the send button on YouTube) and it pops up in
-        your friend's Browserr, at the exact timestamp.
+        Every friend gets a chat in your inbox. Press <kbd>{shortcut('⌘⇧S', 'Ctrl+Shift+S')}</kbd> on any page (or the
+        send button on YouTube) to drop it in, at the exact timestamp.
       </p>
       <button className="primary-btn" disabled={waiting} onClick={start}>
         {waiting ? 'Finish signing in in your browser…' : 'Sign in with Google'}

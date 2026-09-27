@@ -1,7 +1,7 @@
 {
-  "name": "browserr",
-  "productName": "Browserr",
-  "version": "0.1.0",
+  "name": "tabs",
+  "productName": "Tabs",
+  "version": "0.2.0",
   "description": "A Chromium-based browser for sending links to friends in one keystroke.",
   "main": "./out/main/index.js",
   "author": "Sotiris Kaniras",
@@ -15,12 +15,17 @@
     "dist:win": "electron-vite build && electron-builder --win",
     "deploy:firestore": "firebase deploy --only firestore",
     "test:rules": "firebase emulators:exec --only firestore --project browserr-rules-test \"node tests/rules.test.mjs\"",
-    "open:profile": "open -n dist/mac-arm64/Browserr.app --args --profile=friend",
+    "open:main": "open -n dist/mac-arm64/Tabs.app",
+    "open:profile": "open -n dist/mac-arm64/Tabs.app --args --profile=friend",
+    "release": "electron-vite build && GH_TOKEN=$(gh auth token) electron-builder --mac --win --publish always",
     "app:mac": "electron-vite build && electron-builder --mac --dir --arm64",
     "check-electron": "node scripts/check-electron.mjs"
   },
   "dependencies": {
-    "@ghostery/adblocker-electron": "^2.18.2"
+    "@ghostery/adblocker-electron": "^2.18.2",
+    "electron-chrome-web-store": "^0.13.0",
+    "electron-updater": "^6.8.9",
+    "tldts": "^7.4.15"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.2",

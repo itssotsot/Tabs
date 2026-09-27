@@ -58,3 +58,19 @@ export function shareUrl(url: string, timestampSec: number | null, includeTimest
   if (!ref) return url
   return youTubeUrl(ref, includeTimestamp ? timestampSec : null)
 }
+
+/** The start time in a YouTube link (`t=90`, `t=90s`, `t=1m30s`, `start=90`), in seconds. */
+export function youTubeStart(url: string): number | null {
+  let value: string | null
+  try {
+    const u = new URL(url)
+    value = u.searchParams.get('t') ?? u.searchParams.get('start')
+  } catch {
+    return null
+  }
+  if (!value) return null
+  if (/^\d+s?$/.test(value)) return parseInt(value, 10) || null
+  const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(value)
+  if (!m || !m[0]) return null
+  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0) || null
+}

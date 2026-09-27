@@ -7,21 +7,21 @@ import { AccountFooter, SignInCard, UsernameSetup } from './panels/Account'
 import { DownloadsPanel } from './panels/Downloads'
 import { FriendsPanel } from './panels/Friends'
 import { InboxPanel } from './panels/Inbox'
-import { SentPanel } from './panels/Sent'
 
 interface Props {
   panel: SidebarPanel
   onPanel: (panel: SidebarPanel) => void
   onClose: () => void
   downloads: DownloadState[]
+  roomId: string | null
+  onRoom: (roomId: string | null) => void
 }
 
-export function Sidebar({ panel, onPanel, onClose, downloads }: Props): ReactNode {
-  const { authReady, user, profile, unseenCount, incoming } = useSocial()
+export function Sidebar({ panel, onPanel, onClose, downloads, roomId, onRoom }: Props): ReactNode {
+  const { authReady, user, profile, unreadCount, incoming } = useSocial()
 
   const tabs: { id: SidebarPanel; label: string; count?: number }[] = [
-    { id: 'inbox', label: 'Inbox', count: unseenCount },
-    { id: 'sent', label: 'Sent' },
+    { id: 'inbox', label: 'Inbox', count: unreadCount },
     { id: 'friends', label: 'Friends', count: incoming.length },
     { id: 'downloads', label: 'Downloads' }
   ]
@@ -31,9 +31,17 @@ export function Sidebar({ panel, onPanel, onClose, downloads }: Props): ReactNod
   else if (!authReady || (user && profile === undefined)) body = <div className="panel-empty"><span className="spinner" /></div>
   else if (!user) body = <SignInCard />
   else if (!profile) body = <UsernameSetup />
-  else if (panel === 'inbox') body = <InboxPanel />
-  else if (panel === 'sent') body = <SentPanel />
-  else body = <FriendsPanel />
+  else if (panel === 'inbox') body = <InboxPanel roomId={roomId} onRoom={onRoom} />
+  else {
+    body = (
+      <FriendsPanel
+        onOpenChat={(id) => {
+          onRoom(id)
+          onPanel('inbox')
+        }}
+      />
+    )
+  }
 
   return (
     <>
