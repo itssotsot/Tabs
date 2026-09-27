@@ -189,7 +189,8 @@ export class BrowserWindowController implements TabHost {
 
     this.win.once('ready-to-show', () => this.win.show())
     this.colorTimer = setInterval(() => {
-      if (this.win.isFocused() && this.active?.loaded) void this.active.sampleColor()
+      // A fullscreen video hides the toolbar, so there's nothing to color.
+      if (this.win.isFocused() && this.active?.loaded && !this.fullscreenTab) void this.active.sampleColor()
     }, COLOR_SAMPLE_MS)
     browserEvents.emit('window-created', this)
   }

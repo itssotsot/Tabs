@@ -61,6 +61,12 @@ const SCROLL_SETTLE_MS = [80, 400]
 /** After a page first paints, when to read its top color again, as its header finishes drawing. */
 const FOLLOW_UP_SAMPLES_MS = [200, 600, 1500]
 
+/**
+ * Windows draws videos on a hardware overlay, and a capture takes them off it for a frame: the video flashes dark.
+ * So there, the page's colors aren't read while it has a video, and the toolbar keeps the last ones.
+ */
+const CAPTURE_FLASHES_VIDEO = process.platform === 'win32'
+
 /** Whether two #rrggbb colors look the same. Pages that fade their background shouldn't redraw the toolbar every frame. */
 function sameColor(a: string, b: string | null): boolean {
   if (!b) return false
@@ -182,6 +188,8 @@ export class Tab implements Groupable {
   private newTabPage: string | null = null
   /** The page's video, as its preload last reported it. */
   private media: TabMedia | null = null
+  /** Something on the page has played since it loaded; its video may still be showing, even paused. */
+  private playedMedia = false
   /** The top of the page, which the toolbar extends: its main color, and its colors left to right. */
   private pageColor: string | null = null
   private pageEdge: string[] | null = null
@@ -338,6 +346,7 @@ export class Tab implements Groupable {
   async sampleColor(): Promise<void> {
     const wc = this.liveWc
     if (!wc || wc.isDestroyed() || !this.painted) return
+    if (CAPTURE_FLASHES_VIDEO && this.playedMedia) return
     if (this.sampling) return void (this.resample = true)
     const wait = this.lastSampleAt + MIN_SAMPLE_GAP_MS - Date.now()
     if (wait > 0) {
@@ -459,6 +468,7 @@ export class Tab implements Groupable {
     this.failedUrl = null
     this.frozen = false
     this.media = null
+    this.playedMedia = false
     wc.close()
     this.host.onTabUpdated(this)
     return true
@@ -597,6 +607,7 @@ export class Tab implements Groupable {
       if (!url.startsWith(`${INTERNAL_SCHEME}://${ERROR_HOST}/`)) this.failedUrl = null
       this.favicon = null
       this.media = null
+      this.playedMedia = false
       if (this.fromLink && !this.linkLanded && !isInternalUrl(url)) {
         this.fromLink = { ...this.fromLink, landedUrl: url }
         this.linkLanded = true
@@ -621,6 +632,7 @@ export class Tab implements Groupable {
     })
     wc.on('did-finish-load', learnName)
     wc.on('audio-state-changed', update)
+    wc.on('media-started-playing', () => (this.playedMedia = true))
     wc.on('zoom-changed', (_e, direction) => this.zoom(direction))
 
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
@@ -631,6 +643,7 @@ export class Tab implements Groupable {
       if (details.reason === 'clean-exit') return
       this.loading = false
       this.media = null
+      this.playedMedia = false
       this.showError(this.url, 'crashed', 'This page crashed.')
     })
 
