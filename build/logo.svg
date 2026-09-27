@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="252 257 520 510" width="520" height="510">
+  <title>Tabs</title>
+  <!-- The rings from icon.svg without the plate, for the web, README and so on. Same geometry. -->
+  <defs>
+    <linearGradient id="ring0" x1="272" y1="0" x2="752" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="ring1" x1="272" y1="0" x2="752" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c4b5fd"/>
+      <stop offset="1" stop-color="#d946ef"/>
+    </linearGradient>
+    <linearGradient id="ring2" x1="272" y1="0" x2="752" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fdba74"/>
+      <stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+
+    <rect id="r0" x="292" y="297" width="440" height="180" rx="90"/>
+    <rect id="r1" x="292" y="422" width="440" height="180" rx="90"/>
+    <rect id="r2" x="292" y="547" width="440" height="180" rx="90"/>
+
+    <clipPath id="left"><rect x="0" y="0" width="512" height="1024"/></clipPath>
+    <clipPath id="right"><rect x="512" y="0" width="512" height="1024"/></clipPath>
+
+    <mask id="cut0" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <use href="#r1" fill="none" stroke="#000" stroke-width="58" clip-path="url(#right)"/>
+    </mask>
+    <mask id="cut1" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <use href="#r0" fill="none" stroke="#000" stroke-width="58" clip-path="url(#left)"/>
+      <use href="#r2" fill="none" stroke="#000" stroke-width="58" clip-path="url(#right)"/>
+    </mask>
+    <mask id="cut2" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <use href="#r1" fill="none" stroke="#000" stroke-width="58" clip-path="url(#left)"/>
+    </mask>
+  </defs>
+
+  <g fill="none" stroke-width="40">
+    <use href="#r0" stroke="url(#ring0)" mask="url(#cut0)"/>
+    <use href="#r1" stroke="url(#ring1)" mask="url(#cut1)"/>
+    <use href="#r2" stroke="url(#ring2)" mask="url(#cut2)"/>
+  </g>
+</svg>

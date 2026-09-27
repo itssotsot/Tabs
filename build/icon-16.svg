@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <title>Tabs</title>
+  <!-- The 16 px Windows icon, drawn on the pixel grid: the rings are too fine at this size,
+       so it keeps just the three lines and their colors. `npm run icons` uses it. -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161c40"/>
+      <stop offset="1" stop-color="#05060f"/>
+    </linearGradient>
+    <linearGradient id="ring0" x1="3" y1="0" x2="13" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="ring1" x1="3" y1="0" x2="13" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c4b5fd"/>
+      <stop offset="1" stop-color="#d946ef"/>
+    </linearGradient>
+    <linearGradient id="ring2" x1="3" y1="0" x2="13" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fdba74"/>
+      <stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+  </defs>
+  <rect width="16" height="16" rx="3.5" fill="url(#plate)"/>
+  <rect x="3" y="3" width="10" height="2" rx="1" fill="url(#ring0)"/>
+  <rect x="3" y="7" width="10" height="2" rx="1" fill="url(#ring1)"/>
+  <rect x="3" y="11" width="10" height="2" rx="1" fill="url(#ring2)"/>
+</svg>

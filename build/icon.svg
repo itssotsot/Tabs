@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Tabs</title>
+  <!--
+    App icon master. `npm run icons` renders it to icon.icns, icon.ico and icon.png.
+    macOS icon grid: an 824 × 824 plate inside the 1024 canvas, with a drop shadow.
+    Windows crops to the plate (viewBox 100 100 824 824) and drops the shadow.
+
+    Three interlocked rings, 480 wide, centered. Each passes over the next ring on the
+    left and under it on the right. The ring underneath is cut away around the crossing
+    (the "cut" masks), so the gaps are transparent rather than painted in.
+  -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161c40"/>
+      <stop offset="1" stop-color="#05060f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="512" cy="512" r="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.07"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+
+    <linearGradient id="ring0" x1="272" y1="0" x2="752" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="ring1" x1="272" y1="0" x2="752" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c4b5fd"/>
+      <stop offset="1" stop-color="#d946ef"/>
+    </linearGradient>
+    <linearGradient id="ring2" x1="272" y1="0" x2="752" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fdba74"/>
+      <stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+
+    <!-- Ring centerlines: outer edge 272–752 × 220 tall, 40 stroke, rows 125 apart. -->
+    <rect id="r0" x="292" y="297" width="440" height="180" rx="90"/>
+    <rect id="r1" x="292" y="422" width="440" height="180" rx="90"/>
+    <rect id="r2" x="292" y="547" width="440" height="180" rx="90"/>
+
+    <clipPath id="left"><rect x="0" y="0" width="512" height="1024"/></clipPath>
+    <clipPath id="right"><rect x="512" y="0" width="512" height="1024"/></clipPath>
+
+    <!-- A ring's cut: the rings that pass over it, drawn 18 wider than the stroke. -->
+    <mask id="cut0" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <use href="#r1" fill="none" stroke="#000" stroke-width="58" clip-path="url(#right)"/>
+    </mask>
+    <mask id="cut1" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <use href="#r0" fill="none" stroke="#000" stroke-width="58" clip-path="url(#left)"/>
+      <use href="#r2" fill="none" stroke="#000" stroke-width="58" clip-path="url(#right)"/>
+    </mask>
+    <mask id="cut2" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <use href="#r1" fill="none" stroke="#000" stroke-width="58" clip-path="url(#left)"/>
+    </mask>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#plate)"/>
+  </g>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#glow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <rect x="101" y="101" width="822" height="822" rx="184" fill="none" stroke="#fff" stroke-opacity="0.08" stroke-width="2"/>
+
+  <g fill="none" stroke-width="40">
+    <use href="#r0" stroke="url(#ring0)" mask="url(#cut0)"/>
+    <use href="#r1" stroke="url(#ring1)" mask="url(#cut1)"/>
+    <use href="#r2" stroke="url(#ring2)" mask="url(#cut2)"/>
+  </g>
+</svg>

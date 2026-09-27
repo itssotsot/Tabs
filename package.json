@@ -19,7 +19,8 @@
     "open:profile": "open -n dist/mac-arm64/Tabs.app --args --profile=friend",
     "release": "node scripts/release.mjs",
     "app:mac": "electron-vite build && electron-builder --mac --dir --arm64",
-    "check-electron": "node scripts/check-electron.mjs"
+    "check-electron": "node scripts/check-electron.mjs",
+    "icons": "electron scripts/icons.mjs"
   },
   "dependencies": {
     "@ghostery/adblocker-electron": "^2.18.2",
