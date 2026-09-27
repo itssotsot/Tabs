@@ -555,3 +555,11 @@ select {
 .error-page .primary-btn {
   margin-top: 12px;
 }
+
+.setting-text .extension-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 2px;
+  font-size: 12px;
+}

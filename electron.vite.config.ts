@@ -27,7 +27,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           chrome: resolve('src/preload/chrome.ts'),
-          tab: resolve('src/preload/tab.ts')
+          tab: resolve('src/preload/tab.ts'),
+          extension: resolve('src/preload/extension.ts')
         }
       }
     }

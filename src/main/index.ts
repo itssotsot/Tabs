@@ -12,6 +12,7 @@ import { setupPermissions } from './permissions'
 import { setupPredictor } from './predictor'
 import { store } from './store'
 import { setupUpdates } from './updater'
+import { setupWebRequestHub } from './web-request-hub'
 import { BrowserWindowController, controllerFor, focusedController, freezeSession } from './window'
 import { IPC } from '@shared/api'
 import { existsSync, renameSync } from 'node:fs'
@@ -118,6 +119,8 @@ app.whenReady().then(async () => {
   store.init()
 
   const ses = webSession()
+  // Before anything registers webRequest listeners (identity, ad blocker, extensions).
+  setupWebRequestHub(ses)
   setupBrowserIdentity(ses)
 
   registerInternalProtocol()

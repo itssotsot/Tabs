@@ -1,0 +1,16 @@
+// Registers this group's chrome.* namespaces (each module calls defineApi/defineEvent when imported).
+import './chrome-setting'
+import './permissions'
+import './notifications'
+import './cookies'
+import './web-navigation'
+import './browsing-data'
+import './content-settings'
+import './privacy'
+import './proxy'
+import './font-settings'
+import './tts'
+import './system'
+
+export { contentSettingFor } from './content-settings'
+export { privacySetting } from './privacy'

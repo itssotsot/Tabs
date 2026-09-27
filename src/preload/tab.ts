@@ -8,13 +8,16 @@ import { installSharedLinkGuard } from './links'
 import { installBackgroundMediaHold } from './media'
 import { installYouTubeAdBlocking } from './youtube'
 
-if (/^https?:$/.test(location.protocol)) {
+// Preloads also run in iframes (so extensions' user scripts can reach them); these are for the page itself.
+const isTopFrame = window.top === window
+
+if (/^https?:$/.test(location.protocol) && isTopFrame) {
   installBackgroundMediaHold()
   installCosmeticFiltering()
-  if (window.top === window) installSharedLinkGuard()
+  installSharedLinkGuard()
 }
 
-if (location.protocol === `${INTERNAL_SCHEME}:`) {
+if (location.protocol === `${INTERNAL_SCHEME}:` && isTopFrame) {
   const api: InternalAPI = {
     history: (query, limit) => ipcRenderer.invoke(IPC.internalHistory, query, limit),
     removeHistory: (url) => ipcRenderer.invoke(IPC.internalHistoryRemove, url),
@@ -32,12 +35,13 @@ if (location.protocol === `${INTERNAL_SCHEME}:`) {
     setExtensionEnabled: (id, enabled) => ipcRenderer.invoke(IPC.internalExtensionSetEnabled, id, enabled),
     removeExtension: (id) => ipcRenderer.invoke(IPC.internalExtensionRemove, id),
     openExtensionOptions: (id) => ipcRenderer.invoke(IPC.internalExtensionOptions, id),
-    openWebStore: () => ipcRenderer.invoke(IPC.internalOpenWebStore)
+    openWebStore: () => ipcRenderer.invoke(IPC.internalOpenWebStore),
+    setExtensionPinned: (id, pinned) => ipcRenderer.invoke(IPC.internalExtensionSetPinned, id, pinned)
   }
   contextBridge.exposeInMainWorld('browserrInternal', api)
 }
 
-if (/(^|\.)youtube\.com$/.test(location.hostname) && window.top === window) {
+if (/(^|\.)youtube\.com$/.test(location.hostname) && isTopFrame) {
   // Synchronous on purpose: this has to be in place before YouTube's own scripts run.
   if (ipcRenderer.sendSync(IPC.pageAdblockEnabled) === true) installYouTubeAdBlocking()
 

@@ -1,10 +1,10 @@
-import { Clock, Globe, Search, Star } from 'lucide-react'
+import { Clock, Globe, Puzzle, Search, Star } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { Suggestion } from '@shared/types'
 import { prettyUrl } from '@shared/url'
 import { cx } from '../ui/util'
 
-const ICONS = { url: Globe, search: Search, suggest: Search, history: Clock, bookmark: Star }
+const ICONS = { url: Globe, search: Search, suggest: Search, history: Clock, bookmark: Star, extension: Puzzle }
 
 export function Suggestions({ items, selected }: { items: Suggestion[]; selected: number }): ReactNode {
   return (
@@ -28,6 +28,7 @@ export function Suggestions({ items, selected }: { items: Suggestion[]; selected
             <span className="suggestion-title">{item.type === 'url' ? prettyUrl(item.url) : item.title}</span>
             {showUrl && <span className="suggestion-url">— {prettyUrl(item.url)}</span>}
             {item.type === 'search' && <span className="suggestion-url">— Search</span>}
+            {item.detail && <span className="suggestion-url">— {item.detail}</span>}
           </div>
         )
       })}

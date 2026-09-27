@@ -1,5 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import type { Bookmark, DownloadState, FindState, Settings, SidebarPanel, TabLayout, UpdateReady, WindowState } from '@shared/types'
+import type {
+  Bookmark,
+  DownloadState,
+  ExtensionPanelInfo,
+  FindState,
+  Settings,
+  SidebarPanel,
+  TabLayout,
+  ToolbarExtension,
+  UpdateReady,
+  WindowState
+} from '@shared/types'
 import { cx } from '../ui/util'
 import { FindBar } from './FindBar'
 import { Sidebar } from './Sidebar'
@@ -35,6 +46,8 @@ export function App(): ReactNode {
   // Lives here so the open room survives switching sidebar tabs.
   const [roomId, setRoomId] = useState<string | null>(null)
   const [overview, setOverview] = useState(false)
+  const [extensions, setExtensions] = useState<ToolbarExtension[]>([])
+  const [extensionPanel, setExtensionPanel] = useState<ExtensionPanelInfo | null>(null)
 
   const headerRef = useRef<HTMLElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
@@ -48,6 +61,7 @@ export function App(): ReactNode {
       api.settings.onChanged(setSettings),
       api.downloads.onChanged(setDownloads),
       api.updates.onChanged(setUpdate),
+      api.extensions.onToolbar(setExtensions),
       api.find.onState((s) => {
         setFind(s)
         if (!s.open) setFindOpen(false)
@@ -75,6 +89,13 @@ export function App(): ReactNode {
           case 'toggle-tab-overview':
             setOverview((open) => !open)
             break
+          case 'open-extension-panel':
+            setExtensionPanel(cmd.panel)
+            setSidebar('extension')
+            break
+          case 'close-extension-panel':
+            setSidebar((current) => (current === 'extension' ? null : current))
+            break
         }
       })
     ]
@@ -82,6 +103,7 @@ export function App(): ReactNode {
     void api.settings.get().then(setSettings)
     void api.downloads.list().then(setDownloads)
     void api.updates.get().then(setUpdate)
+    void api.extensions.get().then(setExtensions)
     return () => offs.forEach((off) => off())
   }, [])
 
@@ -123,7 +145,14 @@ export function App(): ReactNode {
         <div className="chrome-main">
           <header ref={headerRef} className="chrome-header">
             {layout === 'groups' && <GroupsStrip state={state} layout={layout} onOpenRoom={openRoom} />}
-            <Toolbar state={state} downloads={downloads} update={update} sidebar={sidebar} onToggleSidebar={toggleSidebar} />
+            <Toolbar
+              state={state}
+              downloads={downloads}
+              update={update}
+              sidebar={sidebar}
+              onToggleSidebar={toggleSidebar}
+              extensions={extensions}
+            />
             {findOpen && (
               <FindBar result={find} focusToken={findFocus} nextRequest={findNext} onClose={() => setFindOpen(false)} />
             )}
@@ -139,6 +168,7 @@ export function App(): ReactNode {
                   downloads={downloads}
                   roomId={roomId}
                   onRoom={setRoomId}
+                  extensionPanel={extensionPanel}
                 />
               </aside>
             )}

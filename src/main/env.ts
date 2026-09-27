@@ -19,6 +19,8 @@ export const profile: string | null = (() => {
 export const rendererDir = join(__dirname, '../renderer')
 export const chromePreload = join(__dirname, '../preload/chrome.js')
 export const tabPreload = join(__dirname, '../preload/tab.js')
+/** Gives extension pages and workers the chrome.* APIs Electron lacks (registered on the web session). */
+export const extensionPreload = join(__dirname, '../preload/extension.js')
 
 /** Host under browserr:// that serves the browser's own UI. Never reachable from tabs. */
 const APP_HOST = 'app'

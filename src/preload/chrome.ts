@@ -79,6 +79,15 @@ const api: BrowserrAPI = {
     install: () => ipcRenderer.send(IPC.updateInstall),
     onChanged: (cb) => on(IPC.updateChanged, cb)
   },
+  extensions: {
+    get: () => ipcRenderer.invoke(IPC.extensionsGet),
+    onToolbar: (cb) => on(IPC.extensionsToolbar, cb),
+    activate: (id, anchor) => ipcRenderer.send(IPC.extensionActivate, id, anchor),
+    contextMenu: (id) => ipcRenderer.send(IPC.extensionContextMenu, id),
+    menu: (anchor) => ipcRenderer.send(IPC.extensionsMenu, anchor),
+    panelBounds: (rect) => ipcRenderer.send(IPC.extensionPanelBounds, rect),
+    closePanel: () => ipcRenderer.send(IPC.extensionPanelClose)
+  },
   notify: (n) => ipcRenderer.send(IPC.notify, n),
   setBadge: (count) => ipcRenderer.send(IPC.setBadge, count),
   openUrl: (url, background, fromLink) => ipcRenderer.send(IPC.openUrl, url, background, fromLink),

@@ -1,15 +1,19 @@
 import { app, dialog, nativeImage, webContents, type Session } from 'electron'
 import { installChromeWebStore, uninstallExtension } from 'electron-chrome-web-store'
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, normalize, sep } from 'node:path'
 import type { ExtensionInfo } from '@shared/types'
-import { store } from './store'
-import { controllerFor } from './window'
+import { store } from '../store'
+import { controllerFor } from '../window'
+import { forgetExtensionAccess } from './access'
+import { lifecycle, type LoadReason } from './lifecycle'
+import { forgetExtension } from './router'
+import { clearState, getState, setState } from './state'
 
 /**
- * Chrome extensions, installed from the Chrome Web Store (electron-chrome-web-store).
- * Electron runs content scripts, background workers and options pages, but not toolbar
- * buttons or pop-ups, so extensions that rely on those only partly work.
+ * Installed Chrome extensions: installing from the Chrome Web Store (electron-chrome-web-store),
+ * loading them at startup, turning them off and on, and removing them. The chrome.* APIs they
+ * use live in the rest of this folder.
  */
 
 export const WEB_STORE_URL = 'https://chromewebstore.google.com/category/extensions'
@@ -33,6 +37,7 @@ interface Manifest {
   optional_permissions?: string[]
   content_scripts?: { matches?: string[] }[]
   background?: { service_worker?: string }
+  theme?: unknown
 }
 
 interface Installed {
@@ -126,7 +131,7 @@ function optionsUrl(ext: Installed): string | null {
 }
 
 /** Chrome's install warnings for the permissions people most need to know about. */
-function permissionWarnings(manifest: Manifest): string[] {
+export function permissionWarnings(manifest: Manifest): string[] {
   const permissions = new Set(manifest.permissions ?? [])
   const hosts = [
     ...(manifest.host_permissions ?? []),
@@ -177,7 +182,17 @@ interface InstallDetails {
 async function confirmInstall(details: InstallDetails): Promise<{ action: 'allow' | 'deny' }> {
   const wc = webContents.fromFrame(details.frame)
   const win = wc ? controllerFor(wc)?.win : undefined
-  const warnings = permissionWarnings(details.manifest as Manifest)
+  const manifest = details.manifest as Manifest
+  if (manifest.theme) {
+    const notice: Electron.MessageBoxOptions = {
+      type: 'info',
+      message: `“${details.localizedName}” is a theme`,
+      detail: "Tabs can't use Chrome themes. Extensions work."
+    }
+    await (win ? dialog.showMessageBox(win, notice) : dialog.showMessageBox(notice))
+    return { action: 'deny' }
+  }
+  const warnings = permissionWarnings(manifest)
   const options: Electron.MessageBoxOptions = {
     type: 'question',
     buttons: ['Add extension', 'Cancel'],
@@ -185,12 +200,7 @@ async function confirmInstall(details: InstallDetails): Promise<{ action: 'allow
     cancelId: 1,
     icon: details.icon.isEmpty() ? undefined : details.icon.resize({ width: 64, height: 64 }),
     message: `Add “${details.localizedName}”?`,
-    detail: [
-      warnings.length ? `It can:\n${warnings.map((w) => `• ${w}`).join('\n')}` : '',
-      "Tabs doesn't show extension toolbar buttons or pop-ups yet, so some extensions only partly work."
-    ]
-      .filter(Boolean)
-      .join('\n\n')
+    detail: warnings.length ? `It can:\n${warnings.map((w) => `• ${w}`).join('\n')}` : undefined
   }
   const { response } = await (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options))
   if (response !== 0) return { action: 'deny' }
@@ -199,27 +209,66 @@ async function confirmInstall(details: InstallDetails): Promise<{ action: 'allow
   return { action: 'allow' }
 }
 
+/** True while loading the extensions that were installed before this launch. */
+let starting = true
+/** Loads started by us that aren't installs from the store, so we know why each one happened. */
+const enabling = new Set<string>()
+
 async function load(ext: Installed): Promise<void> {
   if (!ses || ses.extensions.getExtension(ext.id)) return
   try {
-    const loaded = await ses.extensions.loadExtension(ext.path)
+    if (!starting) enabling.add(ext.id)
+    await ses.extensions.loadExtension(ext.path)
     loadErrors.delete(ext.id)
-    // Manifest V3 background workers otherwise only start on their first event.
-    if (loaded.manifest.background?.service_worker) {
-      await ses.serviceWorkers.startWorkerForScope(loaded.url).catch(() => {})
-    }
   } catch (err) {
+    enabling.delete(ext.id)
     loadErrors.set(ext.id, err instanceof Error ? err.message : String(err))
     console.error(`[extensions] couldn't load ${ext.id}`, err)
   }
+}
+
+/** Every load, including the Web Store library's installs and updates: works out why, and tells the API modules. */
+function onExtensionLoaded(extension: Electron.Extension): void {
+  const previous = getState<string | undefined>(extension.id, 'version', undefined)
+  let reason: LoadReason
+  if (!previous) reason = 'install'
+  else if (previous !== extension.version) reason = 'update'
+  else if (enabling.has(extension.id)) reason = 'enable'
+  else reason = starting ? 'startup' : 'enable'
+  enabling.delete(extension.id)
+  setState(extension.id, 'version', extension.version)
+  lifecycle.emit('loaded', extension, reason, reason === 'update' ? previous : undefined)
+  // Manifest V3 background workers otherwise only start on their first event.
+  if ((extension.manifest as Manifest).background?.service_worker) {
+    void ses?.serviceWorkers.startWorkerForScope(extension.url).catch(() => {})
+  }
+}
+
+function onExtensionUnloaded(extension: Electron.Extension): void {
+  forgetExtension(extension.id)
+  forgetExtensionAccess(extension.id)
+  lifecycle.emit('unloaded', extension.id)
+  // Removed from the Web Store page (chrome.management.uninstall) rather than from our page.
+  setTimeout(() => {
+    if (!existsSync(join(extensionsPath(), extension.id)) && !ses?.extensions.getExtension(extension.id)) uninstalled(extension.id)
+  }, 1000)
+}
+
+function uninstalled(id: string): void {
+  if (getState<string | undefined>(id, 'version', undefined) === undefined) return
+  lifecycle.emit('uninstalled', id)
+  clearState(id)
+  store.setDisabledExtensions(store.disabledExtensions.filter((d) => d !== id))
 }
 
 /**
  * Lets tabs install extensions from the Chrome Web Store, then loads the installed ones
  * (except those turned off). Runs before any tab opens so content scripts see every page.
  */
-export async function setupExtensions(session: Session): Promise<void> {
+export async function setupManager(session: Session): Promise<void> {
   ses = session
+  session.extensions.on('extension-loaded', (_e, extension) => onExtensionLoaded(extension))
+  session.extensions.on('extension-unloaded', (_e, extension) => onExtensionUnloaded(extension))
   try {
     // We load extensions ourselves so turned-off ones stay unloaded.
     await installChromeWebStore({ session, extensionsPath: extensionsPath(), loadExtensions: false, beforeInstall: confirmInstall })
@@ -228,6 +277,7 @@ export async function setupExtensions(session: Session): Promise<void> {
   }
   const disabled = new Set(store.disabledExtensions)
   await Promise.all(allInstalled().filter((ext) => !disabled.has(ext.id)).map(load))
+  starting = false
 }
 
 export function listExtensions(): ExtensionInfo[] {
@@ -244,7 +294,10 @@ export function listExtensions(): ExtensionInfo[] {
         enabled,
         icon: iconOf(ext),
         optionsUrl: optionsUrl(ext),
-        error: enabled && !loaded ? (loadErrors.get(ext.id) ?? "This extension couldn't be loaded.") : null
+        error: enabled && !loaded ? (loadErrors.get(ext.id) ?? "This extension couldn't be loaded.") : null,
+        // Filled in by the extensions page's handler (they come from the action and commands modules).
+        pinned: false,
+        shortcuts: []
       }
     })
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -263,7 +316,32 @@ export async function removeExtension(id: string): Promise<void> {
   if (!ID_RE.test(id) || !ses) return
   await uninstallExtension(id, { session: ses, extensionsPath: extensionsPath() })
   loadErrors.delete(id)
-  store.setDisabledExtensions(store.disabledExtensions.filter((d) => d !== id))
+  uninstalled(id)
+}
+
+/** Reloads a running extension (chrome.runtime.reload). */
+export async function reloadExtension(id: string): Promise<void> {
+  const ext = ID_RE.test(id) ? findInstalled(id) : null
+  if (!ext || !ses?.extensions.getExtension(id)) return
+  ses.extensions.removeExtension(id)
+  await load(ext)
+}
+
+/** Name and icon for menus, dialogs and the toolbar. */
+export function extensionDisplay(id: string): { name: string; icon: string | null } | null {
+  const ext = ID_RE.test(id) ? findInstalled(id) : null
+  return ext ? { name: localize(ext, ext.manifest.name) || id, icon: iconOf(ext) } : null
+}
+
+/** A string from the extension's manifest, with `__MSG_…__` placeholders resolved. */
+export function localizedManifestString(id: string, text: string | undefined): string {
+  const ext = ID_RE.test(id) ? findInstalled(id) : null
+  return ext ? localize(ext, text) : (text ?? '')
+}
+
+/** Where an installed extension's files are. */
+export function extensionFolder(id: string): string | null {
+  return (ID_RE.test(id) ? findInstalled(id)?.path : null) ?? null
 }
 
 /** The options page of an installed, running extension. */

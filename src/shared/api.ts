@@ -15,6 +15,7 @@ import type {
   ShareDraft,
   SidebarPanel,
   Suggestion,
+  ToolbarExtension,
   UpdateReady,
   WindowState
 } from './types'
@@ -66,6 +67,12 @@ export const IPC = {
   openUrl: 'app:open-url',
   updateGet: 'update:get',
   updateInstall: 'update:install',
+  extensionsGet: 'extensions:get',
+  extensionActivate: 'extensions:activate',
+  extensionContextMenu: 'extensions:context-menu',
+  extensionsMenu: 'extensions:menu',
+  extensionPanelBounds: 'extensions:panel-bounds',
+  extensionPanelClose: 'extensions:panel-close',
 
   // main -> chrome
   windowState: 'window:state',
@@ -76,6 +83,7 @@ export const IPC = {
   settingsChanged: 'settings:changed',
   downloadsChanged: 'downloads:changed',
   updateChanged: 'update:changed',
+  extensionsToolbar: 'extensions:toolbar',
 
   // overlay <-> main
   overlayState: 'overlay:state',
@@ -110,7 +118,8 @@ export const IPC = {
   internalExtensionSetEnabled: 'internal:extension-set-enabled',
   internalExtensionRemove: 'internal:extension-remove',
   internalExtensionOptions: 'internal:extension-options',
-  internalOpenWebStore: 'internal:open-web-store'
+  internalOpenWebStore: 'internal:open-web-store',
+  internalExtensionSetPinned: 'internal:extension-set-pinned'
 } as const
 
 /** Roles the browser UI may put in its own menus; they act on whatever is focused. */
@@ -218,6 +227,19 @@ export interface BrowserrAPI {
     install(): void
     onChanged(cb: (update: UpdateReady | null) => void): Unsubscribe
   }
+  extensions: {
+    /** The extension buttons for this window's active tab. */
+    get(): Promise<ToolbarExtension[]>
+    onToolbar(cb: (extensions: ToolbarExtension[]) => void): Unsubscribe
+    /** The button was clicked: opens its popup below `anchor` (window coordinates) or tells the extension. */
+    activate(id: string, anchor: Rect): void
+    contextMenu(id: string): void
+    /** The extensions (puzzle) menu, below `anchor`. */
+    menu(anchor: Rect): void
+    /** Where the side panel's page goes (window coordinates), or null when the panel isn't showing. */
+    panelBounds(rect: Rect | null): void
+    closePanel(): void
+  }
   notify(n: AppNotification): void
   setBadge(count: number): void
   /** Opens a page in a new tab. `fromLink` is the key of the shared link it came from, so the tab shows who sent it. */
@@ -253,6 +275,8 @@ export interface InternalAPI {
   openExtensionOptions(id: string): Promise<void>
   /** Opens the Chrome Web Store in a new tab. */
   openWebStore(): Promise<void>
+  /** Shows or hides the extension's button in the toolbar. */
+  setExtensionPinned(id: string, pinned: boolean): Promise<ExtensionInfo[]>
 }
 
 export type { ShareDraft }

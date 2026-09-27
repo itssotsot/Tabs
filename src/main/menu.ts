@@ -5,6 +5,7 @@ import { TAB_LAYOUTS } from '@shared/constants'
 import type { TabLayout } from '@shared/types'
 import { INTERNAL_SCHEME, looksLikeUrl, searchUrl, SEARCH_ENGINE_NAMES, toNavigableUrl } from '@shared/url'
 import { bookmarksChanged, settingsChanged, toggleBookmark } from './broadcast'
+import { extensionHooks } from './extension-hooks'
 import { draftFromLink } from './share'
 import { siteColor, siteName } from './sites'
 import { store } from './store'
@@ -342,6 +343,10 @@ export function showPageContextMenu(c: BrowserWindowController, tab: Tab, p: Con
           separator
         ] as (Item | false)[])
       : []),
+
+    // Items from extensions (chrome.contextMenus)
+    ...extensionHooks.pageMenuItems(c, tab, p),
+    separator,
 
     {
       label: 'Inspect',

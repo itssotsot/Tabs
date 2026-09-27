@@ -2,6 +2,7 @@ import { MAX_SUGGESTIONS } from '@shared/constants'
 import type { SearchEngine, Suggestion } from '@shared/types'
 import { looksLikeUrl, searchUrl, toNavigableUrl } from '@shared/url'
 import { webSession } from './env'
+import { keywordSuggestions } from './extensions/omnibox-bridge'
 import { store } from './store'
 
 const SUGGEST_ENDPOINTS: Record<SearchEngine, (q: string) => string> = {
@@ -26,6 +27,9 @@ async function remoteSuggestions(query: string, engine: SearchEngine): Promise<s
 export async function omniboxSuggestions(text: string): Promise<Suggestion[]> {
   const input = text.trim()
   if (!input) return []
+  // An extension's keyword ("kw text") hands the address bar to that extension.
+  const fromExtension = await keywordSuggestions(text)
+  if (fromExtension) return fromExtension.slice(0, MAX_SUGGESTIONS)
   const engine = store.settings.searchEngine
   const lower = input.toLowerCase()
 

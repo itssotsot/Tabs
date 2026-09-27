@@ -1,4 +1,4 @@
-import { Puzzle, Settings2, Trash2 } from 'lucide-react'
+import { Pin, PinOff, Puzzle, Settings2, Trash2 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { ExtensionInfo } from '@shared/types'
 
@@ -13,9 +13,27 @@ function ExtensionRow({ ext, onChange }: { ext: ExtensionInfo; onChange: (list: 
           {ext.name} <span className="extension-version">{ext.version}</span>
         </strong>
         {ext.description && <span>{ext.description}</span>}
+        {ext.shortcuts.length > 0 && (
+          <span className="extension-shortcuts">
+            {ext.shortcuts.map((s) => (
+              <span key={s.shortcut}>
+                <kbd>{s.shortcut}</kbd> {s.description}
+              </span>
+            ))}
+          </span>
+        )}
         {ext.error && <span className="extension-error">{ext.error}</span>}
       </span>
       <span className="extension-actions">
+        {ext.enabled && !ext.error && (
+          <button
+            className="row-remove"
+            title={ext.pinned ? 'Hide from toolbar' : 'Show in toolbar'}
+            onClick={async () => onChange(await api.setExtensionPinned(ext.id, !ext.pinned))}
+          >
+            {ext.pinned ? <PinOff size={15} /> : <Pin size={15} />}
+          </button>
+        )}
         {ext.optionsUrl && ext.enabled && !ext.error && (
           <button className="row-remove" title="Options" onClick={() => void api.openExtensionOptions(ext.id)}>
             <Settings2 size={15} />
@@ -67,10 +85,7 @@ export function ExtensionsPage(): ReactNode {
           Chrome Web Store
         </button>
       </header>
-      <p className="page-note">
-        Add extensions from the Chrome Web Store. Tabs doesn't show extension toolbar buttons or pop-ups yet, so some extensions
-        only partly work.
-      </p>
+      <p className="page-note">Add extensions from the Chrome Web Store. Pinned ones get a button in the toolbar; the rest are in the extensions menu.</p>
       {!extensions.length ? (
         <p className="empty">No extensions yet.</p>
       ) : (

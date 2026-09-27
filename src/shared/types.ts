@@ -65,12 +65,15 @@ export interface Rect {
   height: number
 }
 
-export type SuggestionType = 'url' | 'search' | 'history' | 'bookmark' | 'suggest'
+/** `extension`: from an extension's address bar keyword (chrome.omnibox). */
+export type SuggestionType = 'url' | 'search' | 'history' | 'bookmark' | 'suggest' | 'extension'
 
 export interface Suggestion {
   type: SuggestionType
   url: string
   title: string
+  /** Extra text after the title, e.g. the extension's name. */
+  detail?: string
 }
 
 export interface ShareDraft {
@@ -90,7 +93,30 @@ export type OverlayState =
   /** A collapsed site group's tabs, shown while you hover its chip. */
   | { mode: 'group'; group: string; name: string; color: string; tabs: TabState[]; activeTabId: number | null }
 
-export type SidebarPanel = 'inbox' | 'friends' | 'downloads'
+/** `extension` is an extension's side panel (chrome.sidePanel). */
+export type SidebarPanel = 'inbox' | 'friends' | 'downloads' | 'extension'
+
+/** An extension's button in the toolbar, as it looks for the window's active tab. */
+export interface ToolbarExtension {
+  id: string
+  name: string
+  /** data: URL. */
+  icon: string | null
+  title: string
+  badgeText: string
+  badgeColor: string
+  badgeTextColor: string
+  enabled: boolean
+  /** Shown in the toolbar; otherwise only in the extensions menu. */
+  pinned: boolean
+}
+
+/** The extension whose side panel is open in the sidebar. */
+export interface ExtensionPanelInfo {
+  id: string
+  name: string
+  icon: string | null
+}
 
 export type ChromeCommand =
   | { type: 'focus-omnibox' }
@@ -102,6 +128,10 @@ export type ChromeCommand =
   /** A notification's link was opened, so its room counts as read. */
   | { type: 'room-read'; roomId: string }
   | { type: 'toggle-tab-overview' }
+  /** Open an extension's popup from its toolbar button (keyboard shortcut, action.openPopup). */
+  | { type: 'open-extension-popup'; extensionId: string }
+  | { type: 'open-extension-panel'; panel: ExtensionPanelInfo }
+  | { type: 'close-extension-panel' }
 
 export interface DownloadState {
   id: string
@@ -193,4 +223,8 @@ export interface ExtensionInfo {
   optionsUrl: string | null
   /** Why it isn't running although it's turned on. */
   error: string | null
+  /** Its button is in the toolbar (not only in the extensions menu). */
+  pinned: boolean
+  /** Keyboard shortcuts it declares, formatted for this platform. */
+  shortcuts: { description: string; shortcut: string }[]
 }

@@ -1,9 +1,10 @@
 import { ArrowDownToLine, ArrowLeft, ArrowRight, CircleArrowUp, MessagesSquare, MoreVertical, RotateCw, Send, X } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { DownloadState, SidebarPanel, UpdateReady, WindowState } from '@shared/types'
+import type { DownloadState, SidebarPanel, ToolbarExtension, UpdateReady, WindowState } from '@shared/types'
 import { useSocial } from '../social/SocialProvider'
 import { Avatar } from '../ui/Avatar'
 import { cx, shortcut } from '../ui/util'
+import { ExtensionButtons } from './ExtensionButtons'
 import { Omnibox } from './Omnibox'
 
 interface Props {
@@ -12,9 +13,10 @@ interface Props {
   update: UpdateReady | null
   sidebar: SidebarPanel | null
   onToggleSidebar: (panel: SidebarPanel) => void
+  extensions: ToolbarExtension[]
 }
 
-export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar }: Props): ReactNode {
+export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar, extensions }: Props): ReactNode {
   const api = window.browserr
   const { user, profile, unreadCount, incoming } = useSocial()
   const tab = state.tabs.find((t) => t.id === state.activeTabId) ?? null
@@ -44,6 +46,8 @@ export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar }: 
       )}
 
       <Omnibox tab={tab} isBookmarked={state.isBookmarked} />
+
+      <ExtensionButtons extensions={extensions} />
 
       <button
         className="send-btn"

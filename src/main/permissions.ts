@@ -1,4 +1,5 @@
 import { BrowserWindow, desktopCapturer, dialog, webContents, type Session, type WebContents } from 'electron'
+import { extensionHooks } from './extension-hooks'
 import { store } from './store'
 
 /** Harmless permissions granted without asking, like Chrome does. */
@@ -42,6 +43,24 @@ function describe(permission: string, mediaTypes?: string[]): string {
     if (wantsAudio && !wantsVideo) return 'use your microphone'
   }
   return ASK[permission] ?? `use "${permission}"`
+}
+
+/** chrome.contentSettings types for the permissions extensions can decide. */
+const CONTENT_SETTING_TYPES: Record<string, string> = { geolocation: 'location', notifications: 'notifications', 'clipboard-read': 'clipboard' }
+
+/** What an extension decided for this site with chrome.contentSettings: true, false, or undefined to ask as usual. */
+function extensionDecision(permission: string, url: string, topUrl: string, mediaTypes?: string[]): boolean | undefined {
+  const types =
+    permission === 'media'
+      ? (mediaTypes?.length ? mediaTypes : ['video', 'audio']).map((t) => (t === 'video' ? 'camera' : 'microphone'))
+      : CONTENT_SETTING_TYPES[permission]
+        ? [CONTENT_SETTING_TYPES[permission]]
+        : []
+  if (!types.length) return undefined
+  const values = types.map((t) => extensionHooks.contentSetting(t, url, topUrl))
+  if (values.includes('block')) return false
+  if (values.every((v) => v === 'allow')) return true
+  return undefined
 }
 
 const pending = new Map<string, Promise<boolean>>()
@@ -88,15 +107,23 @@ export function setupPermissions(ses: Session, windowFor: WindowLookup): void {
     if (!(permission in ASK)) return callback(false)
 
     const origin = originOf(details.requestingUrl || wc.getURL())
+    const mediaTypes = 'mediaTypes' in details ? (details.mediaTypes as string[] | undefined) : undefined
+    if (extensionHooks.extensionPagePermission(permission, details.requestingUrl || wc.getURL())) return callback(true)
+    const decided = extensionDecision(permission, details.requestingUrl || wc.getURL(), wc.getURL(), mediaTypes)
+    if (decided !== undefined) return callback(decided)
     const saved = store.getPermission(origin, permission)
     if (saved) return callback(saved === 'allow')
 
-    const mediaTypes = 'mediaTypes' in details ? (details.mediaTypes as string[] | undefined) : undefined
     ask(windowFor(wc) ?? BrowserWindow.getFocusedWindow(), origin, permission, mediaTypes).then(callback, () => callback(false))
   })
 
-  ses.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
+  ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
     if (AUTO_GRANT.has(permission)) return true
+    const mediaType = (details as { mediaType?: string }).mediaType
+    const media = mediaType === 'video' || mediaType === 'audio' ? [mediaType] : undefined
+    if (extensionHooks.extensionPagePermission(permission, requestingOrigin)) return true
+    const decided = extensionDecision(permission, requestingOrigin, wc?.getURL() ?? requestingOrigin, media)
+    if (decided !== undefined) return decided
     const saved = store.getPermission(originOf(requestingOrigin), permission)
     if (saved) return saved === 'allow'
     // Unknown checks (e.g. background-sync) keep Chromium's default behaviour.

@@ -5,6 +5,7 @@
 // while you're still choosing it in the address bar. The DNS + TCP + TLS handshakes
 // then happen in parallel instead of one by one as the page discovers them.
 import type { Session } from 'electron'
+import { extensionHooks } from './extension-hooks'
 import { store } from './store'
 
 const MAX_HOSTS = 500
@@ -89,7 +90,11 @@ export function setupPredictor(ses: Session): void {
 }
 
 /** Connect to a site and the servers its pages usually need. */
+/** An extension turned off network prediction (chrome.privacy.network.networkPredictionEnabled). */
+const predictionOff = (): boolean => extensionHooks.privacySetting('network.networkPredictionEnabled') === false
+
 export function warmUp(ses: Session, url: string, numSockets = 1): void {
+  if (predictionOff()) return
   const origin = originOf(url)
   const host = hostOf(url)
   if (!origin || !host) return
@@ -104,5 +109,6 @@ export function warmUp(ses: Session, url: string, numSockets = 1): void {
 
 /** A page started loading: open its usual connections right away. */
 export function onNavigationStart(ses: Session, url: string): void {
+  if (predictionOff()) return
   warmUp(ses, url)
 }

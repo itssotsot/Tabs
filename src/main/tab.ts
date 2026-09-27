@@ -12,6 +12,8 @@ import { IPC } from '@shared/api'
 import type { TabLink, TabState } from '@shared/types'
 import { INTERNAL_SCHEME, isInternalUrl, NEW_TAB_URL, pageKey, prettyUrl } from '@shared/url'
 import { tabPreload, webSession } from './env'
+import { browserEvents } from './browser-events'
+import { extensionHooks } from './extension-hooks'
 import { applyIdentity } from './identity'
 import { onNavigationStart } from './predictor'
 import { learnSiteName, siteOf, type Groupable } from './sites'
@@ -86,6 +88,8 @@ export class Tab implements Groupable {
   private failedUrl: string | null = null
   private requestedUrl: string
   private siteCache: { url: string; site: string | null } | null = null
+  /** An extension's page standing in for the new tab page (chrome_url_overrides), while it's showing. */
+  private newTabPage: string | null = null
 
   constructor(
     private readonly host: TabHost,
@@ -124,7 +128,8 @@ export class Tab implements Groupable {
   get url(): string {
     if (this.failedUrl) return this.failedUrl
     if (this.snapshot) return this.snapshot.url
-    return this.liveWc?.getURL() || this.requestedUrl
+    const current = this.liveWc?.getURL() || this.requestedUrl
+    return this.newTabPage && current === this.newTabPage ? NEW_TAB_URL : current
   }
 
   get isInternal(): boolean {
@@ -150,6 +155,10 @@ export class Tab implements Groupable {
     if (!this.holdMedia) return
     this.holdMedia = false
     this.liveWc?.send(IPC.pageReleaseMedia)
+  }
+
+  get isLoading(): boolean {
+    return this.loading
   }
 
   get muted(): boolean {
@@ -210,6 +219,8 @@ export class Tab implements Groupable {
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
+        // Preloads run in iframes too (sandboxed, so no Node): extensions' user scripts are injected from there.
+        nodeIntegrationInSubFrames: true,
         spellcheck: true,
         scrollBounce: true
       }
@@ -318,7 +329,9 @@ export class Tab implements Groupable {
     this.requestedUrl = url
     this.failedUrl = null
     this.snapshot = null
-    this.wc.loadURL(url).catch(() => {
+    const override = url.startsWith(NEW_TAB_URL) ? extensionHooks.newTabOverride() : null
+    this.newTabPage = override
+    this.wc.loadURL(override ?? url).catch(() => {
       // Failures are reported through did-fail-load.
     })
   }
@@ -382,10 +395,12 @@ export class Tab implements Groupable {
     wc.on('did-start-loading', () => {
       this.loading = true
       update()
+      browserEvents.emit('tab-loading', this, true)
     })
     wc.on('did-stop-loading', () => {
       this.loading = false
       update()
+      browserEvents.emit('tab-loading', this, false)
     })
     wc.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument) onNavigationStart(wc.session, details.url)
@@ -457,6 +472,8 @@ export class Tab implements Groupable {
     wc.setWindowOpenHandler(({ url, disposition }) => {
       // Real popups (window.open with features) stay popups so OAuth flows keep window.opener.
       if (disposition === 'new-window') {
+        // An extension blocked popups on this site (chrome.contentSettings).
+        if (extensionHooks.contentSetting('popups', wc.getURL()) === 'block') return { action: 'deny' }
         return {
           action: 'allow',
           overrideBrowserWindowOptions: { width: 520, height: 680, autoHideMenuBar: true, backgroundColor: '#ffffff' }

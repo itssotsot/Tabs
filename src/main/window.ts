@@ -11,6 +11,8 @@ import {
 } from '@shared/constants'
 import type { ChromeCommand, Insets, OverlayState, Rect, ShareDraft, Suggestion, TabLink, WindowState } from '@shared/types'
 import { NEW_TAB_URL, pageKey } from '@shared/url'
+import { browserEvents } from './browser-events'
+import { extensionHooks } from './extension-hooks'
 import { chromePreload, profile, uiUrl, webSession } from './env'
 import { showChromeContextMenu, showPageContextMenu } from './menu'
 import { warmUp } from './predictor'
@@ -40,6 +42,22 @@ function snapshotOf(saved: SavedTab): TabSnapshot {
 let lastFocused: BrowserWindowController | null = null
 let sessionTimer: NodeJS.Timeout | null = null
 let sessionFrozen = false
+
+/** Recently closed tabs, most recent first (for chrome.sessions). */
+export function recentlyClosedTabs(): readonly SavedTab[] {
+  return [...closedTabs].reverse()
+}
+
+/** Reopens a recently closed tab (by its position in recentlyClosedTabs) in the window. Returns the new tab. */
+export function reopenClosedTabAt(position: number, c: BrowserWindowController): Tab | null {
+  const index = closedTabs.length - 1 - position
+  const saved = closedTabs[index]
+  if (!saved) return null
+  closedTabs.splice(index, 1)
+  const tab = c.createTab(saved.url, { snapshot: snapshotOf(saved), fromLink: saved.fromLink })
+  if (saved.createdAt) tab.createdAt = saved.createdAt
+  return tab
+}
 
 export function controllerFor(wc: WebContents): BrowserWindowController | undefined {
   return owners.get(wc.id)
@@ -166,6 +184,7 @@ export class BrowserWindowController implements TabHost {
     }
 
     this.win.once('ready-to-show', () => this.win.show())
+    browserEvents.emit('window-created', this)
   }
 
   // ---- window plumbing ----
@@ -196,17 +215,30 @@ export class BrowserWindowController implements TabHost {
       }
       this.scheduleState()
     })
-    this.win.on('focus', () => (lastFocused = this))
-    this.win.on('moved', scheduleSessionSave)
-    this.win.on('resized', scheduleSessionSave)
+    this.win.on('focus', () => {
+      lastFocused = this
+      browserEvents.emit('window-focused', this)
+    })
+    this.win.on('moved', () => {
+      scheduleSessionSave()
+      browserEvents.emit('window-bounds', this)
+    })
+    this.win.on('resized', () => {
+      scheduleSessionSave()
+      browserEvents.emit('window-bounds', this)
+    })
     this.win.on('closed', () => this.dispose())
   }
 
   private dispose(): void {
     BrowserWindowController.all.delete(this)
     for (const [id, owner] of owners) if (owner === this) owners.delete(id)
-    for (const tab of this.tabs) tab.destroy()
+    for (const tab of this.tabs) {
+      browserEvents.emit('tab-closed', tab, this, true)
+      tab.destroy()
+    }
     this.tabs = []
+    browserEvents.emit('window-closed', this)
     if (!this.overlay.webContents.isDestroyed()) this.overlay.webContents.close()
     if (lastFocused === this) lastFocused = null
     // Closing the last window keeps its tabs in the session, so reopening the app restores them.
@@ -233,12 +265,14 @@ export class BrowserWindowController implements TabHost {
     return this.tabs
   }
 
-  onWebContentsCreated(_tab: Tab, wc: WebContents): void {
+  onWebContentsCreated(tab: Tab, wc: WebContents): void {
     owners.set(wc.id, this)
+    browserEvents.emit('tab-webcontents-created', tab, wc)
   }
 
-  onWebContentsDestroyed(_tab: Tab, wc: WebContents): void {
+  onWebContentsDestroyed(tab: Tab, wc: WebContents): void {
     owners.delete(wc.id)
+    browserEvents.emit('tab-webcontents-destroyed', tab, wc)
   }
 
   get activeTab(): Tab | null {
@@ -321,6 +355,7 @@ export class BrowserWindowController implements TabHost {
     const app = profile ? `Tabs (${profile})` : 'Tabs'
     this.win.setTitle(active ? `${active.state.title} – ${app}` : app)
     scheduleSessionSave()
+    browserEvents.emit('window-state', this)
   }
 
   // ---- tabs ----
@@ -347,7 +382,8 @@ export class BrowserWindowController implements TabHost {
   }
 
   openTab(url: string, { active, opener }: { active: boolean; opener: Tab }): void {
-    this.createTab(url, { active, index: this.tabs.indexOf(opener) + 1 })
+    const tab = this.createTab(url, { active, index: this.tabs.indexOf(opener) + 1 })
+    browserEvents.emit('tab-opened', tab, opener, url)
   }
 
   activate(tab: Tab): void {
@@ -382,6 +418,7 @@ export class BrowserWindowController implements TabHost {
       if (closedTabs.length > 25) closedTabs.shift()
     }
     this.tabs.splice(index, 1)
+    browserEvents.emit('tab-closed', tab, this, false)
     if (this.fullscreenTab === tab) this.onTabFullscreen(tab, false)
     if (this.active === tab) {
       this.win.contentView.removeChildView(tab.view)
@@ -793,6 +830,7 @@ export class BrowserWindowController implements TabHost {
   /** Shortcuts the app menu can't express. Returns true when handled. */
   handleInput(input: Input): boolean {
     if (input.type !== 'keyDown') return false
+    if (extensionHooks.shortcut(input, this)) return true
     const mod = isMac ? input.meta : input.control
     const key = input.key
 

@@ -94,7 +94,10 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
       e.preventDefault()
       const delta = e.key === 'ArrowDown' ? 1 : -1
       s.selected = (s.selected + delta + s.items.length) % s.items.length
-      setText(s.items[s.selected].type === 'search' || s.items[s.selected].type === 'suggest' ? s.items[s.selected].title : s.items[s.selected].url)
+      const picked = s.items[s.selected]
+      // Extension suggestions keep the keyword, like Chrome ("kw " + the suggestion).
+      if (picked.type === 'extension') setText(`${text.replace(/^(\s*\S+\s).*$/, '$1')}${new URL(picked.url).searchParams.get('q') ?? ''}`)
+      else setText(picked.type === 'search' || picked.type === 'suggest' ? picked.title : picked.url)
       showDropdown()
     } else if (e.key === 'Enter') {
       e.preventDefault()

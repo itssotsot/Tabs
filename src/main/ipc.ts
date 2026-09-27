@@ -7,11 +7,25 @@ import { signInWithGoogle } from './auth'
 import { bookmarksChanged, settingsChanged, toggleBookmark, toggleBookmarkUrl } from './broadcast'
 import { downloadAction, listDownloads } from './downloads'
 import { webSession } from './env'
-import { extensionOptionsUrl, listExtensions, removeExtension, setExtensionEnabled, WEB_STORE_URL } from './extensions'
+import {
+  activateAction,
+  closeSidePanel,
+  extensionOptionsUrl,
+  extensionsForPage,
+  removeExtension,
+  setExtensionEnabled,
+  setPinned,
+  setSidePanelBounds,
+  showExtensionContextMenu,
+  showExtensionsMenu,
+  toolbarFor,
+  WEB_STORE_URL
+} from './extensions'
 import { showAppMenu, showBookmarkContextMenu, showRendererMenu, showSiteInfoMenu, showTabContextMenu, showTabGroupMenu, showTabLayoutMenu } from './menu'
 import { showNotification } from './notifications'
 import { draftFromLink, draftFromUrl } from './share'
 import { omniboxSuggestions } from './omnibox'
+import { enterOmniboxInput, omniboxClosed } from './extensions/omnibox-bridge'
 import { warmUp } from './predictor'
 import { store } from './store'
 import { installUpdate, pendingUpdate } from './updater'
@@ -117,7 +131,10 @@ const PANELS: SidebarPanel[] = ['inbox', 'friends', 'downloads']
 
 export function registerIpc(): void {
   // Tabs and navigation
-  onChrome(IPC.tabCreate, (c, url) => c.createTab(isString(url) ? toNavigableUrl(url, store.settings.searchEngine) : undefined))
+  onChrome(IPC.tabCreate, (c, url) => {
+    if (isString(url) && enterOmniboxInput(url.trim(), 'newForegroundTab')) return
+    c.createTab(isString(url) ? toNavigableUrl(url, store.settings.searchEngine) : undefined)
+  })
   onChrome(IPC.tabClose, (c, id) => isNumber(id) && c.closeById(id))
   onChrome(IPC.tabActivate, (c, id) => isNumber(id) && c.activateById(id))
   onChrome(IPC.tabMove, (c, id, to, into) => {
@@ -132,7 +149,10 @@ export function registerIpc(): void {
     if (tab) showTabContextMenu(c, tab)
   })
   onChrome(IPC.tabToggleMute, (c, id) => (isNumber(id) ? c.tabById(id) : undefined)?.toggleMute())
-  onChrome(IPC.navigate, (c, input) => isString(input) && c.navigate(toNavigableUrl(input, store.settings.searchEngine)))
+  onChrome(IPC.navigate, (c, input) => {
+    if (!isString(input) || enterOmniboxInput(input.trim(), 'currentTab')) return
+    c.navigate(toNavigableUrl(input, store.settings.searchEngine))
+  })
   onChrome(IPC.navBack, (c) => c.activeTab?.goBack())
   onChrome(IPC.navForward, (c) => c.activeTab?.goForward())
   onChrome(IPC.navReload, (c) => c.activeTab?.reload())
@@ -168,7 +188,10 @@ export function registerIpc(): void {
       if (isWebUrl(target)) warmUp(webSession(), target, 2)
     }
   })
-  onChrome(IPC.omniboxHide, (c) => c.hideSuggestions())
+  onChrome(IPC.omniboxHide, (c) => {
+    c.hideSuggestions()
+    omniboxClosed()
+  })
 
   // Find in page
   onChrome(IPC.findStart, (c, text, forward, findNext) => isString(text) && c.startFind(text, forward !== false, findNext === true))
@@ -244,6 +267,14 @@ export function registerIpc(): void {
   onChrome(IPC.updateInstall, () => void installUpdate())
 
   // Overlay
+  // Extension buttons and side panels
+  handleChrome(IPC.extensionsGet, (c) => toolbarFor(c))
+  onChrome(IPC.extensionActivate, (c, id, anchor) => isString(id) && isRect(anchor) && activateAction(c, id, anchor))
+  onChrome(IPC.extensionContextMenu, (c, id) => isString(id) && showExtensionContextMenu(c, id))
+  onChrome(IPC.extensionsMenu, (c, anchor) => isRect(anchor) && showExtensionsMenu(c, anchor))
+  onChrome(IPC.extensionPanelBounds, (c, rect) => setSidePanelBounds(c, isRect(rect) ? rect : null))
+  onChrome(IPC.extensionPanelClose, (c) => closeSidePanel(c))
+
   onChrome(IPC.overlayPick, (c, index) => isNumber(index) && c.pickSuggestion(index))
   onChrome(IPC.overlayClose, (c) => c.closeOverlay())
   onChrome(IPC.overlayPeekHover, (c, inside) => c.peekHover('panel', inside === true))
@@ -298,14 +329,18 @@ export function registerIpc(): void {
   })
 
   // Extensions
-  handleInternal(IPC.internalExtensions, () => listExtensions())
+  handleInternal(IPC.internalExtensions, () => extensionsForPage())
   handleInternal(IPC.internalExtensionSetEnabled, async (id, enabled) => {
     if (isString(id) && typeof enabled === 'boolean') await setExtensionEnabled(id, enabled)
-    return listExtensions()
+    return extensionsForPage()
   })
   handleInternal(IPC.internalExtensionRemove, async (id) => {
     if (isString(id)) await removeExtension(id)
-    return listExtensions()
+    return extensionsForPage()
+  })
+  handleInternal(IPC.internalExtensionSetPinned, (id, pinned) => {
+    if (isString(id) && typeof pinned === 'boolean') setPinned(id, pinned)
+    return extensionsForPage()
   })
   handleInternalInWindow(IPC.internalExtensionOptions, (c, id) => {
     const url = isString(id) ? extensionOptionsUrl(id) : null

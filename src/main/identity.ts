@@ -1,4 +1,5 @@
 import { app, type Session, type WebContents } from 'electron'
+import { addBlockingHandler } from './web-request-hub'
 
 /**
  * Google sign-in (and some other sites) refuse "embedded" browsers. Hiding "Electron" in the
@@ -171,6 +172,12 @@ export function applyIdentity(wc: WebContents, url = wc.getURL()): void {
   }
 }
 
+/** Applies the identity again even if it looks current, e.g. after an extension's debugger session overrode it. */
+export function reapplyIdentity(wc: WebContents): void {
+  applied.delete(wc)
+  applyIdentity(wc)
+}
+
 /** Makes every page in the session (tabs and popups) present as Google Chrome, or Firefox where needed. */
 export function setupBrowserIdentity(ses: Session): void {
   const userAgent = chromeUserAgent()
@@ -191,26 +198,29 @@ export function setupBrowserIdentity(ses: Session): void {
     wc.on('did-redirect-navigation', follow)
   })
 
-  // The ad blocker owns onBeforeRequest/onHeadersReceived; Electron allows one listener per event.
-  ses.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, (details, callback) => {
-    const { requestHeaders, webContents } = details
-    const names = Object.keys(requestHeaders)
-    // A navigation takes the identity of where it's going; everything else, that of its page.
-    const identity =
-      details.resourceType === 'mainFrame' || !webContents
-        ? identityFor(details.url)
-        : (applied.get(webContents) ?? 'chrome')
-    if (identity === 'firefox') {
-      for (const name of names) {
-        if (/^sec-ch-ua/i.test(name)) delete requestHeaders[name]
-        else if (name.toLowerCase() === 'user-agent') requestHeaders[name] = firefoxUserAgent()
+  addBlockingHandler(ses, 'onBeforeSendHeaders', {
+    id: 'identity',
+    urls: ['https://*/*'],
+    handle: (details) => {
+      const { requestHeaders, webContents } = details
+      const names = Object.keys(requestHeaders)
+      // A navigation takes the identity of where it's going; everything else, that of its page.
+      const identity =
+        details.resourceType === 'mainFrame' || !webContents
+          ? identityFor(details.url)
+          : (applied.get(webContents) ?? 'chrome')
+      if (identity === 'firefox') {
+        for (const name of names) {
+          if (/^sec-ch-ua/i.test(name)) delete requestHeaders[name]
+          else if (name.toLowerCase() === 'user-agent') requestHeaders[name] = firefoxUserAgent()
+        }
+      } else {
+        // Leaving Google, a navigation can start before the page's override switches back.
+        for (const name of names) if (name.toLowerCase() === 'user-agent') requestHeaders[name] = chromeUserAgent()
+        const isFrame = details.resourceType === 'mainFrame' || details.resourceType === 'subFrame'
+        if (isFrame && !names.some((name) => name.toLowerCase() === 'sec-ch-ua')) Object.assign(requestHeaders, NAVIGATION_HINTS)
       }
-    } else {
-      // Leaving Google, a navigation can start before the page's override switches back.
-      for (const name of names) if (name.toLowerCase() === 'user-agent') requestHeaders[name] = chromeUserAgent()
-      const isFrame = details.resourceType === 'mainFrame' || details.resourceType === 'subFrame'
-      if (isFrame && !names.some((name) => name.toLowerCase() === 'sec-ch-ua')) Object.assign(requestHeaders, NAVIGATION_HINTS)
+      return { requestHeaders }
     }
-    callback({ requestHeaders })
   })
 }

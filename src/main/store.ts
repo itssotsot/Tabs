@@ -1,12 +1,26 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { TAB_LAYOUTS } from '@shared/constants'
 import type { Bookmark, HistoryEntry, Settings, TabLink } from '@shared/types'
 
+/** History and bookmark changes, for code that follows along (the Chrome extension APIs). */
+interface StoreEventMap {
+  /** A page was visited (after the entry was updated). */
+  'history-visit': [entry: HistoryEntry]
+  /** Entries left history: these URLs, or everything. */
+  'history-removed': [removed: { urls: string[]; all: boolean }]
+  /** The bookmark list changed in any way (added, removed, renamed, moved). */
+  'bookmarks-changed': []
+}
+
+export const storeEvents = new EventEmitter<StoreEventMap>()
+storeEvents.setMaxListeners(50)
+
 /** A JSON file loaded once at startup and written back shortly after each change. */
-class JsonFile<T> {
+export class JsonFile<T> {
   private readonly path: string
   private timer: NodeJS.Timeout | null = null
   data: T
@@ -122,6 +136,7 @@ class Stores {
     }
     this.pruneHistory()
     this.history.save()
+    storeEvents.emit('history-visit', entries[url])
   }
 
   updateTitle(url: string, title: string): void {
@@ -136,10 +151,9 @@ class Stores {
     const entries = this.history.data.entries
     const keys = Object.keys(entries)
     if (keys.length <= HISTORY_LIMIT) return
-    keys
-      .sort((a, b) => entries[a].lastVisit - entries[b].lastVisit)
-      .slice(0, keys.length - HISTORY_LIMIT)
-      .forEach((k) => delete entries[k])
+    const expired = keys.sort((a, b) => entries[a].lastVisit - entries[b].lastVisit).slice(0, keys.length - HISTORY_LIMIT)
+    expired.forEach((k) => delete entries[k])
+    storeEvents.emit('history-removed', { urls: expired, all: false })
   }
 
   searchHistory(query: string, limit: number): HistoryEntry[] {
@@ -198,14 +212,26 @@ class Stores {
     return [...byHost.values()].sort((a, b) => b.visitCount - a.visitCount).slice(0, limit)
   }
 
+  /** Every history entry, in no particular order. */
+  historyEntries(): HistoryEntry[] {
+    return Object.values(this.history.data.entries)
+  }
+
+  historyEntry(url: string): HistoryEntry | undefined {
+    return this.history.data.entries[url]
+  }
+
   removeHistory(url: string): void {
+    const existed = url in this.history.data.entries
     delete this.history.data.entries[url]
     this.history.save()
+    if (existed) storeEvents.emit('history-removed', { urls: [url], all: false })
   }
 
   clearHistory(): void {
     this.history.data.entries = {}
     this.history.save()
+    storeEvents.emit('history-removed', { urls: [], all: true })
     this.predictorFile.data.hosts = {}
     this.predictorFile.save()
     this.sitesFile.data.names = {}
@@ -222,21 +248,43 @@ class Stores {
     return this.bookmarks.find((b) => b.url === url)
   }
 
-  addBookmark(url: string, title: string): Bookmark {
+  /** Adds at the end, or at `index`. */
+  addBookmark(url: string, title: string, index?: number): Bookmark {
     const bookmark = { id: randomUUID(), url, title: title || url, createdAt: Date.now() }
-    this.bookmarksFile.data.items = [...this.bookmarks, bookmark]
+    const items = [...this.bookmarks]
+    items.splice(index === undefined ? items.length : Math.max(0, Math.min(index, items.length)), 0, bookmark)
+    this.bookmarksFile.data.items = items
     this.bookmarksFile.save()
+    storeEvents.emit('bookmarks-changed')
     return bookmark
   }
 
   removeBookmark(id: string): void {
     this.bookmarksFile.data.items = this.bookmarks.filter((b) => b.id !== id)
     this.bookmarksFile.save()
+    storeEvents.emit('bookmarks-changed')
   }
 
   renameBookmark(id: string, title: string): void {
-    this.bookmarksFile.data.items = this.bookmarks.map((b) => (b.id === id ? { ...b, title } : b))
+    this.updateBookmark(id, { title })
+  }
+
+  updateBookmark(id: string, patch: { title?: string; url?: string }): void {
+    this.bookmarksFile.data.items = this.bookmarks.map((b) => (b.id === id ? { ...b, ...patch } : b))
     this.bookmarksFile.save()
+    storeEvents.emit('bookmarks-changed')
+  }
+
+  /** Moves a bookmark to `index` in the list as it is after taking the bookmark out. */
+  moveBookmark(id: string, index: number): void {
+    const items = [...this.bookmarks]
+    const from = items.findIndex((b) => b.id === id)
+    if (from === -1) return
+    const [bookmark] = items.splice(from, 1)
+    items.splice(Math.max(0, Math.min(index, items.length)), 0, bookmark)
+    this.bookmarksFile.data.items = items
+    this.bookmarksFile.save()
+    storeEvents.emit('bookmarks-changed')
   }
 
   // Settings

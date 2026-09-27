@@ -1,0 +1,12 @@
+// Each module registers its chrome.* namespace with the router when imported.
+import './tabs'
+import './windows'
+import './runtime'
+import './action'
+import './context-menus'
+import './commands'
+import './side-panel'
+import './network/index'
+import './scripting/index'
+import './platform/index'
+import './data/index'
