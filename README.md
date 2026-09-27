@@ -24,6 +24,7 @@ Installed copies check [GitHub Releases](https://github.com/itssotsot/tabs/relea
 
 ```bash
 npm version patch --no-git-tag-version   # or minor; the version must go up
+git commit -am "Release 0.2.1" && git push
 npm run release                          # builds Mac + Windows and publishes them (uses your `gh` login)
 ```
 

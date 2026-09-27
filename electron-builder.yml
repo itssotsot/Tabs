@@ -25,7 +25,8 @@ publish:
   provider: github
   owner: itssotsot
   repo: tabs
-  releaseType: release
+  # scripts/release.mjs makes the draft first and publishes it once every file is up.
+  releaseType: draft
 protocols:
   - name: Web
     schemes: [http, https]
