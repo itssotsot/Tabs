@@ -17,6 +17,8 @@ export interface TabState {
   canGoForward: boolean
   audible: boolean
   muted: boolean
+  /** The page's video, on sites whose player the tab can control (YouTube). Null when nothing has played. */
+  media: TabMedia | null
   pinned: boolean
   zoomPercent: number
   secure: boolean
@@ -29,6 +31,32 @@ export interface TabState {
   fromLink: TabLink | null
   /** When the tab was opened (ms since epoch). Kept across restarts. */
   createdAt: number
+  /** The main color along the top of the page (#rrggbb), which the toolbar takes on. Null until read. */
+  color: string | null
+  /** The colors along the top of the page from left to right, evenly spaced, which the toolbar extends upward. */
+  edge: string[] | null
+}
+
+/** Where a tab's video is. The strip works out the current position from `time`, `rate` and `at`. */
+export interface TabMedia {
+  paused: boolean
+  /** Seconds into the video when this was read. */
+  time: number
+  /** Seconds, or null for live streams. */
+  duration: number | null
+  /** How fast `time` moves (0 while paused or buffering). */
+  rate: number
+  /** When `time` was read (ms since epoch). */
+  at: number
+}
+
+export type MediaCommand = { type: 'toggle' } | { type: 'seek'; time: number }
+
+/** The colors along the top of a tab's page, as in its `TabState`. */
+export interface PageEdge {
+  tabId: number
+  color: string
+  edge: string[]
 }
 
 export interface WindowState {
@@ -85,11 +113,33 @@ export interface ShareDraft {
   timestampSec: number | null
 }
 
+/**
+ * The address bar as the send picker needs it. Rather than where the bar is, which changes as the window is
+ * resized, it's the toolbar around it (which doesn't): the picker lays out a copy of the toolbar and finds the
+ * bar in it, so it follows a resize in the same frame. And the bar's colors, which follow the page.
+ */
+export interface OmniboxAnchor {
+  /** The browser UI's classes (the tab layout), which the toolbar's styles depend on. */
+  chromeClass: string
+  /** Where the toolbar starts: past the tab sidebar, and below the tab strip. */
+  left: number
+  top: number
+  /** How wide the toolbar's buttons before and after the bar are, gaps between them included. */
+  before: number
+  after: number
+  /** CSS colors, as the address bar's own background and text. */
+  background: string
+  foreground: string
+}
+
 export type OverlayState =
   | { mode: 'hidden' }
   | { mode: 'suggestions'; items: Suggestion[]; selected: number }
-  /** `more` are the rest of the links when sending a whole tab group. */
-  | { mode: 'send'; draft: ShareDraft; more?: ShareDraft[] }
+  /**
+   * `more` are the rest of the links when sending a whole tab group. `anchor` is the address bar, which the
+   * picker grows out of; null when it isn't on screen.
+   */
+  | { mode: 'send'; draft: ShareDraft; more?: ShareDraft[]; anchor: OmniboxAnchor | null; windowWidth: number }
   /** A collapsed site group's tabs, shown while you hover its chip. */
   | { mode: 'group'; group: string; name: string; color: string; tabs: TabState[]; activeTabId: number | null }
 
@@ -120,6 +170,8 @@ export interface ExtensionPanelInfo {
 
 export type ChromeCommand =
   | { type: 'focus-omnibox' }
+  /** The send picker opened out of the address bar (or closed back into it). */
+  | { type: 'send-picker'; open: boolean }
   | { type: 'toggle-sidebar'; panel?: SidebarPanel }
   | { type: 'open-sidebar'; panel: SidebarPanel }
   | { type: 'open-find' }
@@ -132,6 +184,10 @@ export type ChromeCommand =
   | { type: 'open-extension-popup'; extensionId: string }
   | { type: 'open-extension-panel'; panel: ExtensionPanelInfo }
   | { type: 'close-extension-panel' }
+  /** Show the welcome intro again, at the import step (File › Import Bookmarks and History). */
+  | { type: 'show-import' }
+  /** The intro was finished in some window, so every window closes it. */
+  | { type: 'intro-finished' }
 
 export interface DownloadState {
   id: string
@@ -164,6 +220,7 @@ export type SearchEngine = 'google' | 'duckduckgo' | 'bing' | 'brave'
 /** How tabs, links from chats, and favorites are laid out. */
 export type TabLayout = 'vertical' | 'groups'
 
+
 export interface Settings {
   searchEngine: SearchEngine
   adblock: boolean
@@ -176,6 +233,39 @@ export interface Settings {
   groupTabsBySite: boolean
   /** Sites (registrable domains) whose tabs are never grouped. */
   ungroupedSites: string[]
+  /** Show on each tab how long ago it was opened. */
+  showTabAge: boolean
+  /** Mark each tab in a group with a line in the group's color. */
+  showGroupLines: boolean
+}
+
+/** A browser (profile) on this computer that bookmarks and history can be imported from. */
+export interface ImportSource {
+  id: string
+  browser: string
+  kind: 'chromium' | 'firefox' | 'safari'
+  /** The browser's app icon (data: URL), if it could be found. */
+  icon: string | null
+  /** Set when the browser has more than one profile. */
+  profile: string | null
+  /** macOS won't let Tabs read it until Tabs has Full Disk Access (Safari). */
+  needsAccess: boolean
+}
+
+/** Favorites come from the other browser's bookmarks bar. */
+export interface ImportCounts {
+  favorites: number
+  history: number
+}
+
+export interface ImportPreview extends ImportCounts {
+  /** Bookmarks on the bar that aren't favorites yet. Only the first `favorites` of them come over. */
+  favoritesFound: number
+}
+
+export interface ImportChoice {
+  favorites: boolean
+  history: boolean
 }
 
 export interface GoogleCredential {

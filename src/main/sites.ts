@@ -1,6 +1,6 @@
 import type { WebContents } from 'electron'
 import { getDomain } from 'tldts'
-import { colorFor } from '@shared/colors'
+import { defaultSiteColor } from '@shared/colors'
 import { store } from './store'
 
 /** What grouping needs to know about a tab. */
@@ -84,9 +84,9 @@ export function siteName(site: string): string {
   return store.siteName(site) ?? fallbackName(site)
 }
 
-/** The color picked for the site's group, else its automatic one. */
+/** The color picked for the site's group, else its default one. */
 export function siteColor(site: string): string {
-  return store.siteColor(site) ?? colorFor(site)
+  return store.siteColor(site) ?? defaultSiteColor(site)
 }
 
 const READ_SITE_NAME = `(() => {

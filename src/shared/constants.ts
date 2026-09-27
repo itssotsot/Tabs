@@ -19,3 +19,4 @@ export const TAB_LAYOUTS: { id: TabLayout; name: string; description: string }[]
   { id: 'vertical', name: 'Vertical sidebar', description: 'Favorites, chat links and tabs in a column on the left' },
   { id: 'groups', name: 'Tab groups per chat', description: 'Each chat is a collapsible group of its links' }
 ]
+

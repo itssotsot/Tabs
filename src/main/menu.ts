@@ -97,6 +97,8 @@ export function buildAppMenu(): void {
         { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', click: withWindow((c) => c.reopenClosedTab()) },
         { label: 'Open Location…', accelerator: 'CmdOrCtrl+L', click: withWindow((c) => c.focusOmnibox()) },
         separator,
+        { label: 'Import Bookmarks and History…', click: withWindow((c) => c.sendCommand({ type: 'show-import' })) },
+        separator,
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: withWindow((c) => c.closeActiveTab()) },
         { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', click: withWindow((c) => c.win.close()) },
         separator,
@@ -498,16 +500,22 @@ function swatch(hex: string): NativeImage {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
   const center = px / 2
   const radius = px / 2 - 2
+  // A gray rim, so black shows on a dark menu and white on a light one.
+  const RIM = 1.5
+  const GRAY = 128
+  const cover = (d: number, r: number): number => Math.max(0, Math.min(1, r - d + 0.5))
   // BGRA with premultiplied alpha, and a soft edge.
   const buf = Buffer.alloc(px * px * 4)
   for (let y = 0; y < px; y++) {
     for (let x = 0; x < px; x++) {
-      const a = Math.max(0, Math.min(1, radius - Math.hypot(x + 0.5 - center, y + 0.5 - center) + 0.5))
+      const d = Math.hypot(x + 0.5 - center, y + 0.5 - center)
+      const fill = cover(d, radius - RIM)
+      const rim = cover(d, radius) - fill
       const i = (y * px + x) * 4
-      buf[i] = Math.round(b * a)
-      buf[i + 1] = Math.round(g * a)
-      buf[i + 2] = Math.round(r * a)
-      buf[i + 3] = Math.round(255 * a)
+      buf[i] = Math.round(b * fill + GRAY * rim)
+      buf[i + 1] = Math.round(g * fill + GRAY * rim)
+      buf[i + 2] = Math.round(r * fill + GRAY * rim)
+      buf[i + 3] = Math.round(255 * (fill + rim))
     }
   }
   image = nativeImage.createFromBitmap(buf, { width: px, height: px, scaleFactor: 2 })
@@ -530,7 +538,7 @@ export function showTabGroupMenu(c: BrowserWindowController, site: string): void
       label: 'Color',
       icon: swatch(siteColor(site)),
       submenu: [
-        { label: 'Automatic', type: 'radio', checked: !picked, click: () => setSiteColor(site, null) },
+        { label: 'Default', type: 'radio', checked: !picked, click: () => setSiteColor(site, null) },
         separator,
         ...GROUP_COLORS.map(
           ({ name, hex }): Item => ({ label: name, icon: swatch(hex), type: 'radio', checked: picked === hex, click: () => setSiteColor(site, hex) })

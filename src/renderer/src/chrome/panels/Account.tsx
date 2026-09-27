@@ -6,7 +6,7 @@ import { useSocial } from '../../social/SocialProvider'
 import { Avatar } from '../../ui/Avatar'
 import { shortcut } from '../../ui/util'
 
-function authErrorMessage(err: unknown): string {
+export function authErrorMessage(err: unknown): string {
   const code = (err as { code?: string }).code ?? ''
   const message = (err as Error).message ?? ''
   if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
@@ -18,7 +18,8 @@ function authErrorMessage(err: unknown): string {
   return message || 'Sign-in failed.'
 }
 
-export function SignInCard(): ReactNode {
+/** Google sign-in in the user's own browser: `waiting` until they finish there. Starting again cancels the last try. */
+export function useGoogleSignIn(): { start: () => Promise<void>; waiting: boolean; error: string } {
   const [waiting, setWaiting] = useState(false)
   const [error, setError] = useState('')
   // Retrying cancels the previous attempt; only the latest one may update the UI.
@@ -36,6 +37,12 @@ export function SignInCard(): ReactNode {
       if (id === attempt.current) setWaiting(false)
     }
   }
+
+  return { start, waiting, error }
+}
+
+export function SignInCard(): ReactNode {
+  const { start, waiting, error } = useGoogleSignIn()
 
   return (
     <div className="onboarding">
@@ -69,10 +76,24 @@ function suggestUsername(name: string | null, email: string | null): string {
   return base.length >= 3 ? base : ''
 }
 
-export function UsernameSetup(): ReactNode {
+type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid'
+
+interface UsernameField {
+  username: string
+  /** Lowercases and drops spaces, like the field should. */
+  setUsername: (value: string) => void
+  status: UsernameStatus
+  hint: string
+  saving: boolean
+  error: string
+  save: (e: React.FormEvent) => Promise<void>
+}
+
+/** Picking a username for the signed-in user: suggests one, checks it's free as you type, and saves the profile. */
+export function useUsernameField(): UsernameField {
   const { user } = useSocial()
   const [username, setUsername] = useState(() => suggestUsername(user?.displayName ?? null, user?.email ?? null))
-  const [status, setStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle')
+  const [status, setStatus] = useState<UsernameStatus>('idle')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -88,11 +109,9 @@ export function UsernameSetup(): ReactNode {
     return () => clearTimeout(timer)
   }, [username])
 
-  if (!user) return null
-
   const save = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
-    if (status !== 'available') return
+    if (!user || status !== 'available') return
     setSaving(true)
     setError('')
     try {
@@ -113,6 +132,23 @@ export function UsernameSetup(): ReactNode {
     invalid: 'Use 3–20 lowercase letters, numbers or _'
   }
 
+  return {
+    username,
+    setUsername: (value) => setUsername(value.toLowerCase().replace(/\s/g, '')),
+    status,
+    hint: hints[status],
+    saving,
+    error,
+    save
+  }
+}
+
+export function UsernameSetup(): ReactNode {
+  const { user } = useSocial()
+  const { username, setUsername, status, hint, saving, error, save } = useUsernameField()
+
+  if (!user) return null
+
   return (
     <form className="onboarding" onSubmit={save}>
       <Avatar profile={null} photoURL={user.photoURL} size={56} />
@@ -125,10 +161,10 @@ export function UsernameSetup(): ReactNode {
           value={username}
           maxLength={20}
           spellCheck={false}
-          onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
+          onChange={(e) => setUsername(e.target.value)}
         />
       </div>
-      <p className={`field-hint ${status}`}>{hints[status]}</p>
+      <p className={`field-hint ${status}`}>{hint}</p>
       <button className="primary-btn" type="submit" disabled={status !== 'available' || saving}>
         {saving ? 'Saving…' : 'Continue'}
       </button>

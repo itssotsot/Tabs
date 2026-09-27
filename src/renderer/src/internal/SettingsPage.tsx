@@ -71,6 +71,18 @@ export function SettingsPage(): ReactNode {
           checked={settings.groupTabsBySite}
           onChange={(v) => void update({ groupTabsBySite: v })}
         />
+        <Toggle
+          label="Show how long tabs have been open"
+          detail="Each tab shows when you opened it, like 5m or 2h. Hover a tab for the exact time."
+          checked={settings.showTabAge}
+          onChange={(v) => void update({ showTabAge: v })}
+        />
+        <Toggle
+          label="Show group colors on tabs"
+          detail="Each tab in a group gets a line in the group's color: along the left in the sidebar, along the bottom in the tab bar."
+          checked={settings.showGroupLines}
+          onChange={(v) => void update({ showGroupLines: v })}
+        />
         {settings.groupTabsBySite && settings.ungroupedSites.length > 0 && (
           <div className="setting">
             <span className="setting-text">
@@ -122,6 +134,15 @@ export function SettingsPage(): ReactNode {
             )}
           </div>
         )}
+        <div className="setting">
+          <span className="setting-text">
+            <strong>Import from another browser</strong>
+            <span>Bring over the bookmarks bar (as favorites) and history from Chrome, Safari, Firefox, Arc and others.</span>
+          </span>
+          <button className="secondary-btn" onClick={() => void api.openImport()}>
+            Import…
+          </button>
+        </div>
       </section>
 
       <section className="card">

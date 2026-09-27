@@ -1,5 +1,5 @@
-import { AlertTriangle, Lock, Search, Star } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { AlertTriangle, Lock, RotateCw, Search, Send, Star, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { Suggestion, TabState } from '@shared/types'
 import { copyText, MENU_SEPARATOR, popupMenu } from '../ui/menu'
 import { cx, shortcut } from '../ui/util'
@@ -27,6 +27,57 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
 
   const tabUrl = tab?.url ?? ''
 
+  // While the send picker is open it grows out of the address bar, which squares off to become part of it.
+  const [expanded, setExpanded] = useState(false)
+
+  // Tell the main process about the toolbar around the address bar and the bar's colors, so the send picker can
+  // lay out a copy of the toolbar and grow out of the bar in it (see OmniboxAnchor). None of it changes as the
+  // window is resized; it's checked after every render (buttons come and go beside the bar) and whenever the
+  // toolbar takes on a new page color.
+  const reportedAnchor = useRef('')
+  const reportAnchor = useRef(() => {})
+  reportAnchor.current = () => {
+    const el = wrapRef.current
+    const toolbar = el?.parentElement
+    const main = el?.closest('.chrome-main')
+    const chrome = el?.closest('.chrome')
+    if (!el || !toolbar || !main || !chrome) return
+    const items = [...toolbar.children]
+    const at = items.indexOf(el)
+    const span = (group: Element[]): number =>
+      group.length ? group.at(-1)!.getBoundingClientRect().right - group[0].getBoundingClientRect().left : 0
+    const style = getComputedStyle(el)
+    const anchor = {
+      chromeClass: chrome.className,
+      left: main.getBoundingClientRect().left,
+      top: toolbar.getBoundingClientRect().top,
+      before: span(items.slice(0, at)),
+      after: span(items.slice(at + 1)),
+      // The variables rather than the used colors, which may be mid-hover.
+      background: style.getPropertyValue('--bg-input').trim(),
+      foreground: style.getPropertyValue('--text').trim()
+    }
+    const key = JSON.stringify(anchor)
+    if (key === reportedAnchor.current) return
+    reportedAnchor.current = key
+    api.omnibox.setAnchor(anchor)
+  }
+  useLayoutEffect(() => reportAnchor.current())
+  useLayoutEffect(() => {
+    const report = (): void => reportAnchor.current()
+    const resized = new ResizeObserver(report)
+    const recolored = new MutationObserver(report)
+    if (wrapRef.current) resized.observe(wrapRef.current)
+    const header = wrapRef.current?.closest('.chrome-header')
+    if (header) recolored.observe(header, { attributes: true, attributeFilter: ['style'] })
+    window.addEventListener('resize', report)
+    return () => {
+      resized.disconnect()
+      recolored.disconnect()
+      window.removeEventListener('resize', report)
+    }
+  }, [])
+
   // Show the page URL unless the user is mid-edit.
   useEffect(() => {
     if (!dirty) setText(focused ? tabUrl : displayUrl(tabUrl))
@@ -41,6 +92,7 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
   useEffect(
     () =>
       api.onCommand((cmd) => {
+        if (cmd.type === 'send-picker') return setExpanded(cmd.open)
         if (cmd.type !== 'focus-omnibox') return
         inputRef.current?.focus()
         inputRef.current?.select()
@@ -125,7 +177,7 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
   const SecurityIcon = !tabUrl || internalPage ? Search : tab?.secure ? Lock : AlertTriangle
 
   return (
-    <div ref={wrapRef} className={cx('omnibox', focused && 'focused')}>
+    <div ref={wrapRef} className={cx('omnibox', focused && 'focused', expanded && 'expanded')}>
       <button
         className={cx('omnibox-icon', !tab?.secure && tabUrl && !internalPage && 'insecure')}
         tabIndex={-1}
@@ -183,6 +235,16 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
           {tab.zoomPercent}%
         </button>
       )}
+      {tab &&
+        (tab.loading ? (
+          <button className="omnibox-reload" tabIndex={-1} title="Stop loading" onClick={() => api.nav.stop()}>
+            <X size={15} strokeWidth={2} />
+          </button>
+        ) : (
+          <button className="omnibox-reload" tabIndex={-1} title={`Reload (${shortcut('⌘R', 'Ctrl+R')})`} onClick={() => api.nav.reload()}>
+            <RotateCw size={14} strokeWidth={2} />
+          </button>
+        ))}
       {!internalPage && tabUrl && (
         <button
           className={cx('omnibox-star', isBookmarked && 'on')}
@@ -190,6 +252,16 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
           onClick={() => api.bookmarks.toggleCurrent()}
         >
           <Star size={15} strokeWidth={2} fill={isBookmarked ? 'currentColor' : 'none'} />
+        </button>
+      )}
+      {!internalPage && tabUrl && (
+        <button
+          className="omnibox-send"
+          tabIndex={-1}
+          title={`Send to a friend (${shortcut('⌘⇧S', 'Ctrl+Shift+S')})`}
+          onClick={() => api.share.openPicker()}
+        >
+          <Send size={14} strokeWidth={2} />
         </button>
       )}
     </div>

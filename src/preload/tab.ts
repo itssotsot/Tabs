@@ -6,13 +6,18 @@ import { INTERNAL_SCHEME } from '@shared/url'
 import { installCosmeticFiltering } from './cosmetics'
 import { installSharedLinkGuard } from './links'
 import { installBackgroundMediaHold } from './media'
+import { installMediaControls } from './media-controls'
+import { installPageColorHints } from './page-color'
 import { installYouTubeAdBlocking } from './youtube'
 
 // Preloads also run in iframes (so extensions' user scripts can reach them); these are for the page itself.
 const isTopFrame = window.top === window
 
+if (isTopFrame) installPageColorHints()
+
 if (/^https?:$/.test(location.protocol) && isTopFrame) {
   installBackgroundMediaHold()
+  installMediaControls()
   installCosmeticFiltering()
   installSharedLinkGuard()
 }
@@ -36,7 +41,8 @@ if (location.protocol === `${INTERNAL_SCHEME}:` && isTopFrame) {
     removeExtension: (id) => ipcRenderer.invoke(IPC.internalExtensionRemove, id),
     openExtensionOptions: (id) => ipcRenderer.invoke(IPC.internalExtensionOptions, id),
     openWebStore: () => ipcRenderer.invoke(IPC.internalOpenWebStore),
-    setExtensionPinned: (id, pinned) => ipcRenderer.invoke(IPC.internalExtensionSetPinned, id, pinned)
+    setExtensionPinned: (id, pinned) => ipcRenderer.invoke(IPC.internalExtensionSetPinned, id, pinned),
+    openImport: () => ipcRenderer.invoke(IPC.internalOpenImport)
   }
   contextBridge.exposeInMainWorld('browserrInternal', api)
 }

@@ -9,7 +9,7 @@ import {
   SUGGESTION_PADDING,
   SUGGESTION_ROW_HEIGHT
 } from '@shared/constants'
-import type { ChromeCommand, Insets, OverlayState, Rect, ShareDraft, Suggestion, TabLink, WindowState } from '@shared/types'
+import type { ChromeCommand, Insets, OmniboxAnchor, OverlayState, Rect, ShareDraft, Suggestion, TabLink, WindowState } from '@shared/types'
 import { NEW_TAB_URL, pageKey } from '@shared/url'
 import { browserEvents } from './browser-events'
 import { extensionHooks } from './extension-hooks'
@@ -23,6 +23,8 @@ import { Tab, type TabHost, type TabSnapshot } from './tab'
 
 const isMac = process.platform === 'darwin'
 const CHROME_BG = '#161618'
+/** How often the active page's top color is re-read for the toolbar, for changes that come without a paint or scroll hint. */
+const COLOR_SAMPLE_MS = 1000
 
 /** Every webContents we own (UI, overlay, tabs) -> its window controller. */
 const owners = new Map<number, BrowserWindowController>()
@@ -54,9 +56,7 @@ export function reopenClosedTabAt(position: number, c: BrowserWindowController):
   const saved = closedTabs[index]
   if (!saved) return null
   closedTabs.splice(index, 1)
-  const tab = c.createTab(saved.url, { snapshot: snapshotOf(saved), fromLink: saved.fromLink })
-  if (saved.createdAt) tab.createdAt = saved.createdAt
-  return tab
+  return c.createTab(saved.url, { snapshot: snapshotOf(saved), fromLink: saved.fromLink })
 }
 
 export function controllerFor(wc: WebContents): BrowserWindowController | undefined {
@@ -118,9 +118,13 @@ export class BrowserWindowController implements TabHost {
   private peek: { group: string; anchor: Rect; overChip: boolean; overPanel: boolean } | null = null
   private peekTimer: NodeJS.Timeout | null = null
   private overlayAttached = false
+  /** Where the address bar is and how it looks, reported by the browser UI. The send picker grows out of it. */
+  private omniboxAnchor: OmniboxAnchor | null = null
   private fullscreenTab: Tab | null = null
   private enteredFullscreenForTab = false
   private stateTimer: NodeJS.Timeout | null = null
+  /** Re-reads the active page's top color, so the toolbar follows it as you scroll. */
+  private colorTimer: NodeJS.Timeout
   /** Sites whose group was broken up with Ungroup. It forms again when another tab from the site opens. */
   private readonly suspendedSites = new Set<string>()
 
@@ -184,6 +188,9 @@ export class BrowserWindowController implements TabHost {
     }
 
     this.win.once('ready-to-show', () => this.win.show())
+    this.colorTimer = setInterval(() => {
+      if (this.win.isFocused() && this.active?.loaded) void this.active.sampleColor()
+    }, COLOR_SAMPLE_MS)
     browserEvents.emit('window-created', this)
   }
 
@@ -231,6 +238,7 @@ export class BrowserWindowController implements TabHost {
   }
 
   private dispose(): void {
+    clearInterval(this.colorTimer)
     BrowserWindowController.all.delete(this)
     for (const [id, owner] of owners) if (owner === this) owners.delete(id)
     for (const tab of this.tabs) {
@@ -403,6 +411,7 @@ export class BrowserWindowController implements TabHost {
     tab.wc.focus()
     this.win.webContents.send(IPC.findState, { open: false, matches: 0, activeMatch: 0 })
     this.scheduleState()
+    void tab.sampleColor()
   }
 
   activateById(id: number): void {
@@ -456,8 +465,7 @@ export class BrowserWindowController implements TabHost {
   reopenClosedTab(): void {
     const last = closedTabs.pop()
     if (!last) return
-    const tab = this.createTab(last.url, { snapshot: snapshotOf(last), fromLink: last.fromLink })
-    if (last.createdAt) tab.createdAt = last.createdAt
+    this.createTab(last.url, { snapshot: snapshotOf(last), fromLink: last.fromLink })
   }
 
   duplicateTab(tab: Tab): void {
@@ -569,12 +577,16 @@ export class BrowserWindowController implements TabHost {
   }
 
   /** Moves a whole group to where it was dropped: onto the tab at `toIndex`, like dragging a single tab. */
-  moveGroup(site: string, toIndex: number): void {
+  /**
+   * Moves a site group's tabs, together, next to the tab at `toIndex` (or that tab's whole group). `place` says
+   * which side; without it, the group goes past the tab in the direction it moved.
+   */
+  moveGroup(site: string, toIndex: number, place?: 'before' | 'after'): void {
     const groups = this.currentGroups()
     const members = this.tabs.filter((t) => groups.get(t) === site)
     const target = this.tabs[toIndex]
     if (!members.length || !target || members.includes(target)) return
-    const after = toIndex > this.tabs.indexOf(members[0])
+    const after = place ? place === 'after' : toIndex > this.tabs.indexOf(members[0])
     // Dropped on another group, it goes before or after that whole group.
     const other = groups.get(target)
     const edge = other ? (after ? this.tabs.findLast((t) => groups.get(t) === other)! : this.tabs.find((t) => groups.get(t) === other)!) : target
@@ -627,6 +639,10 @@ export class BrowserWindowController implements TabHost {
     const tab = active ?? this.createTab(url)
     tab.load(url)
     tab.wc.focus()
+  }
+
+  onTabEdge(tab: Tab, edge: { color: string; edge: string[] }): void {
+    if (tab === this.active && !this.win.isDestroyed()) this.win.webContents.send(IPC.pageEdge, { tabId: tab.id, ...edge })
   }
 
   onTabUpdated(tab: Tab): void {
@@ -701,8 +717,12 @@ export class BrowserWindowController implements TabHost {
 
   private setOverlay(state: OverlayState): void {
     if (state.mode !== 'group') this.forgetPeek()
+    const wasSend = this.overlayState.mode === 'send'
     this.overlayState = state
     this.overlay.webContents.send(IPC.overlayState, state)
+    // The address bar squares off while the picker grows out of it, and rounds again once it's gone.
+    if (state.mode === 'send' && state.anchor && !wasSend) this.sendCommand({ type: 'send-picker', open: true })
+    else if (wasSend && state.mode !== 'send') this.sendCommand({ type: 'send-picker', open: false })
   }
 
   showSuggestions(items: Suggestion[], selected: number, rect: Rect): void {
@@ -724,8 +744,19 @@ export class BrowserWindowController implements TabHost {
     this.detachOverlay()
   }
 
+  setOmniboxAnchor(anchor: OmniboxAnchor): void {
+    this.omniboxAnchor = anchor
+    // An open picker follows the bar, as the window is resized.
+    const state = this.overlayState
+    if (state.mode === 'send' && state.anchor) this.setOverlay({ ...state, anchor })
+  }
+
   openSendPicker(draft: ShareDraft, more?: ShareDraft[]): void {
-    this.setOverlay({ mode: 'send', draft, more })
+    // Full size before the picker renders, so it lays itself out against the whole window.
+    const [width, height] = this.win.getContentSize()
+    this.overlay.setBounds({ x: 0, y: 0, width, height })
+    // A full-screen video hides the address bar.
+    this.setOverlay({ mode: 'send', draft, more, anchor: this.fullscreenTab ? null : this.omniboxAnchor, windowWidth: width })
     this.attachOverlay()
     this.layout()
     this.overlay.webContents.focus()

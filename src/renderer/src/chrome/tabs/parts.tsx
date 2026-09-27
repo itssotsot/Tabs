@@ -1,5 +1,5 @@
-import { Globe, PanelsTopLeft, Plus, Star, Volume2, VolumeX, X } from 'lucide-react'
-import { useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { Globe, PanelsTopLeft, Plus, Star, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { TAB_LAYOUTS } from '@shared/constants'
 import type { TabLayout, TabState, WindowState } from '@shared/types'
 import { hostOf } from '@shared/url'
@@ -8,6 +8,7 @@ import { Avatar } from '../../ui/Avatar'
 import { copyText, MENU_SEPARATOR, popupMenu } from '../../ui/menu'
 import { cx, shortcut, siteIcon, timeAgo } from '../../ui/util'
 import { useLinks, type SharedLink } from './links'
+import { hasMediaBar, MediaButton, MediaProgress, MuteButton } from './media'
 
 export function TabIcon({ tab }: { tab: TabState }): ReactNode {
   const [broken, setBroken] = useState<string | null>(null)
@@ -16,6 +17,48 @@ export function TabIcon({ tab }: { tab: TabState }): ReactNode {
     return <img className="favicon" src={tab.favicon} alt="" draggable={false} onError={() => setBroken(tab.favicon)} />
   }
   return <Globe className="favicon" size={15} strokeWidth={1.75} />
+}
+
+/** Space between the end of a scrolling title and its start coming round again. */
+const MARQUEE_GAP = 32
+/** How fast a title scrolls, in pixels a second. */
+const MARQUEE_SPEED = 40
+
+/**
+ * A title that, when too long to fit, scrolls along while its tab is hovered. A second copy follows it,
+ * so it loops round to the start instead of scrolling back.
+ */
+export function MarqueeText({ text, className }: { text: string; className: string }): ReactNode {
+  const box = useRef<HTMLSpanElement>(null)
+  const first = useRef<HTMLSpanElement>(null)
+  /** How far one loop moves the text; 0 when it fits. */
+  const [shift, setShift] = useState(0)
+  useLayoutEffect(() => {
+    const el = box.current
+    const textEl = first.current
+    if (!el || !textEl) return
+    const measure = (): void => {
+      const width = textEl.getBoundingClientRect().width
+      setShift(width > el.clientWidth + 1 ? Math.round(width + MARQUEE_GAP) : 0)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [text])
+  const style = shift ? ({ '--marquee-shift': `${-shift}px`, '--marquee-time': `${shift / MARQUEE_SPEED}s` } as CSSProperties) : undefined
+  return (
+    <span ref={box} className={cx(className, 'marquee-box')}>
+      <span className={cx('marquee', shift > 0 && 'moving')} style={style}>
+        <span ref={first}>{text}</span>
+        {shift > 0 && (
+          <span style={{ paddingLeft: MARQUEE_GAP }} aria-hidden>
+            {text}
+          </span>
+        )}
+      </span>
+    </span>
+  )
 }
 
 /** A site icon with the face of whoever sent the link in the corner, for links from two-person chats. */
@@ -133,7 +176,7 @@ function useMinute(): number {
   return useSyncExternalStore(subscribeMinute, () => minuteNow)
 }
 
-/** How long ago a tab was opened (or its link sent), short enough for the strip: now, 5m, 2h, 3d. */
+/** How long ago a tab was opened (or a link sent), short enough for the strip: now, 5m, 2h, 3d. */
 function tabAge(since: number, now: number): string {
   const min = Math.floor(Math.max(0, now - since) / MINUTE_MS)
   if (min < 1) return 'now'
@@ -172,16 +215,17 @@ export function TabItem({ tab, index, active, dragging, onDragStart, onDrop, sho
   const now = useMinute()
   const chatLink = linkForTab(tab)
   const link = showSender ? chatLink : undefined
-  // A tab opened from a chat counts from when the link was sent, not when you opened it.
-  const since = chatLink ? (chatLink.createdAt?.getTime() ?? now) : tab.createdAt
-  const opened = chatLink ? `${chatLink.mine ? 'Sent' : 'Received'} ${formatWhen(since)}` : `Opened ${formatWhen(since)}`
+  const since = tab.createdAt
+  // When a chat's link was sent is in the tooltip; the age is always this tab's own.
+  const sent = chatLink?.createdAt ? `\n${chatLink.mine ? 'Sent' : 'Received'} ${formatWhen(chatLink.createdAt.getTime())}` : ''
+  const opened = `Opened ${formatWhen(since)}${sent}`
   const style = color ? ({ '--group': color } as CSSProperties) : undefined
   return (
     <div
       role="tab"
       aria-selected={active}
       title={tab.url ? `${tab.title}\n${tab.url}\n${opened}${tab.sleeping ? '\nSleeping to save memory' : ''}` : `${tab.title}\n${opened}`}
-      className={cx('tab', active && 'active', tab.pinned && 'pinned', dragging && 'dragging', tab.sleeping && 'sleeping', color && 'grouped', className)}
+      className={cx('tab', active && 'active', tab.pinned && 'pinned', dragging && 'dragging', tab.sleeping && 'sleeping', color && 'grouped', hasMediaBar(tab) && 'has-media', className)}
       style={style}
       data-tab-id={tab.id}
       draggable
@@ -206,28 +250,26 @@ export function TabItem({ tab, index, active, dragging, onDragStart, onDrop, sho
       }}
     >
       {link ? <LinkIcon url={tab.url} link={link} favicon={<TabIcon tab={tab} />} /> : <TabIcon tab={tab} />}
-      {!tab.pinned && <span className="tab-title">{tab.title}</span>}
+      {!tab.pinned && <MarqueeText className="tab-title" text={tab.title} />}
       {!tab.pinned && <span className="tab-age">{tabAge(since, now)}</span>}
-      {(tab.audible || tab.muted) && (
-        <button
-          className="tab-audio"
-          title={tab.muted ? 'Unmute tab' : 'Mute tab'}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => tabs.toggleMute(tab.id)}
-        >
-          {tab.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-        </button>
+      {/* A pinned tab is just its icon, plus mute while it plays. */}
+      {tab.pinned ? (
+        <MuteButton tab={tab} />
+      ) : (
+        <span className="tab-actions">
+          <MuteButton tab={tab} animated />
+          <MediaButton tab={tab} />
+          <button
+            className="tab-close"
+            title={closeTitle ?? `Close tab (${shortcut('⌘W', 'Ctrl+W')})`}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => (onClose ? onClose() : tabs.close(tab.id))}
+          >
+            <X size={13} strokeWidth={2.25} />
+          </button>
+        </span>
       )}
-      {!tab.pinned && (
-        <button
-          className="tab-close"
-          title={closeTitle ?? `Close tab (${shortcut('⌘W', 'Ctrl+W')})`}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => (onClose ? onClose() : tabs.close(tab.id))}
-        >
-          <X size={13} strokeWidth={2.25} />
-        </button>
-      )}
+      <MediaProgress tab={tab} />
     </div>
   )
 }
@@ -319,7 +361,7 @@ export function LinkTab({ url, title, sender, tooltip, onOpen, onDismiss, dismis
       }}
     >
       <LinkIcon url={url} link={sender} />
-      <span className="tab-title">{title}</span>
+      <MarqueeText className="tab-title" text={title} />
       {/* Pending messages have no server time yet; they're brand new. */}
       {sentAt !== undefined && <span className="tab-age">{tabAge(sentAt?.getTime() ?? now, now)}</span>}
       <StarButton url={url} title={title} className="tab-star" />

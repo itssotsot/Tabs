@@ -24,6 +24,8 @@ export class JsonFile<T> {
   private readonly path: string
   private timer: NodeJS.Timeout | null = null
   data: T
+  /** False when there was no file yet (or it couldn't be read). */
+  readonly loaded: boolean
 
   constructor(name: string, fallback: T) {
     const dir = app.getPath('userData')
@@ -31,8 +33,10 @@ export class JsonFile<T> {
     this.path = join(dir, `${name}.json`)
     try {
       this.data = { ...fallback, ...JSON.parse(readFileSync(this.path, 'utf8')) }
+      this.loaded = true
     } catch {
       this.data = fallback
+      this.loaded = false
     }
   }
 
@@ -86,7 +90,9 @@ export const DEFAULT_SETTINGS: Settings = {
   memorySaver: true,
   tabLayout: 'vertical',
   groupTabsBySite: true,
-  ungroupedSites: []
+  ungroupedSites: [],
+  showTabAge: false,
+  showGroupLines: false
 }
 
 /** Site names learned from pages; the oldest go first past this. */
@@ -101,6 +107,7 @@ class Stores {
   private predictorFile!: JsonFile<{ hosts: PredictorData }>
   private sitesFile!: JsonFile<{ names: Record<string, string>; colors: Record<string, string> }>
   private extensionsFile!: JsonFile<{ disabled: string[] }>
+  private introFile!: JsonFile<{ done: boolean }>
 
   /** Must run after `app.whenReady()` so userData is final. */
   init(): void {
@@ -114,10 +121,17 @@ class Stores {
     this.predictorFile = new JsonFile('predictor', { hosts: {} })
     this.sitesFile = new JsonFile('sites', { names: {}, colors: {} })
     this.extensionsFile = new JsonFile('extensions', { disabled: [] })
+    this.introFile = new JsonFile('intro', { done: false })
+    if (!this.introFile.loaded) {
+      // Copies set up before the intro existed have settings already; they skip it. Saving now means
+      // settings changed during the intro can't make it look like one of those next time.
+      this.introFile.data.done = this.settingsFile.loaded
+      this.introFile.save()
+    }
   }
 
   flushAll(): void {
-    for (const f of [this.history, this.bookmarksFile, this.settingsFile, this.sessionFile, this.permissionsFile, this.predictorFile, this.sitesFile, this.extensionsFile]) {
+    for (const f of [this.history, this.bookmarksFile, this.settingsFile, this.sessionFile, this.permissionsFile, this.predictorFile, this.sitesFile, this.extensionsFile, this.introFile]) {
       f.flush()
     }
   }
@@ -154,6 +168,25 @@ class Stores {
     const expired = keys.sort((a, b) => entries[a].lastVisit - entries[b].lastVisit).slice(0, keys.length - HISTORY_LIMIT)
     expired.forEach((k) => delete entries[k])
     storeEvents.emit('history-removed', { urls: expired, all: false })
+  }
+
+  /** Merges visits from another browser: counts add up and the latest visit wins. Returns how many pages were new. */
+  importHistory(visits: HistoryEntry[]): number {
+    const entries = this.history.data.entries
+    let added = 0
+    for (const v of visits) {
+      const existing = entries[v.url]
+      if (!existing) added++
+      entries[v.url] = {
+        url: v.url,
+        title: existing?.title || v.title || v.url,
+        visitCount: (existing?.visitCount ?? 0) + Math.max(1, v.visitCount),
+        lastVisit: Math.max(existing?.lastVisit ?? 0, v.lastVisit)
+      }
+    }
+    this.pruneHistory()
+    this.history.save()
+    return added
   }
 
   searchHistory(query: string, limit: number): HistoryEntry[] {
@@ -259,6 +292,17 @@ class Stores {
     return bookmark
   }
 
+  /** Adds pages at the end as one change. Returns how many were added. */
+  importBookmarks(pages: { url: string; title: string }[]): number {
+    const now = Date.now()
+    const added = pages.map((p, i) => ({ id: randomUUID(), url: p.url, title: p.title || p.url, createdAt: now + i }))
+    if (!added.length) return 0
+    this.bookmarksFile.data.items = [...this.bookmarks, ...added]
+    this.bookmarksFile.save()
+    storeEvents.emit('bookmarks-changed')
+    return added.length
+  }
+
   removeBookmark(id: string): void {
     this.bookmarksFile.data.items = this.bookmarks.filter((b) => b.id !== id)
     this.bookmarksFile.save()
@@ -297,6 +341,17 @@ class Stores {
     this.settingsFile.data = { ...this.settingsFile.data, ...patch }
     this.settingsFile.save()
     return this.settingsFile.data
+  }
+
+  // First-run intro
+
+  get introDone(): boolean {
+    return this.introFile.data.done
+  }
+
+  finishIntro(): void {
+    this.introFile.data.done = true
+    this.introFile.save()
   }
 
   // Extensions

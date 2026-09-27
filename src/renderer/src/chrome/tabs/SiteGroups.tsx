@@ -1,9 +1,10 @@
 import { ChevronRight, Globe } from 'lucide-react'
-import { useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react'
-import { colorFor } from '@shared/colors'
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react'
+import { defaultSiteColor } from '@shared/colors'
 import type { TabState, WindowState } from '@shared/types'
 import { hostOf } from '@shared/url'
 import { cx, siteIcon } from '../../ui/util'
+import { hasMediaBar } from './media'
 import { useStoredState, type TabDrag } from './parts'
 
 type Run = { tab: TabState } | { group: string; tabs: TabState[] }
@@ -76,19 +77,83 @@ export function closeGroupPeek(): void {
   peekOpenUntil = 0
 }
 
-/** Where a dragged tab would land in a vertical list. */
+/**
+ * While a group is dragged, the pointer carries the whole group: its chip and the tabs showing (all of them when
+ * it's open, the tab you're on when it's collapsed). The browser takes the picture once, from a copy made here.
+ */
+function setGroupDragImage(e: DragEvent<HTMLElement>, vertical: boolean): void {
+  const chip = e.currentTarget
+  const group = chip.closest<HTMLElement>('.tab-group')
+  const root = chip.closest<HTMLElement>('.chrome')
+  if (!group?.parentElement || !root) return
+  const parts = [...group.children].filter((c): c is HTMLElement => c instanceof HTMLElement && c.getBoundingClientRect().height > 0)
+  if (parts.length < 2) return
+
+  // The copy sits in bare copies of the list's containers, so the list's styles still apply to it.
+  const chain: HTMLElement[] = []
+  for (let el: HTMLElement | null = group; el && el !== root.parentElement; el = el.parentElement) chain.unshift(el)
+  const shells = chain.map((el) => {
+    const shell = el.cloneNode(false) as HTMLElement
+    shell.removeAttribute('id')
+    return shell
+  })
+  shells.reduce((outer, inner) => (outer.appendChild(inner), inner))
+  const host = shells[0]
+  Object.assign(host.style, { position: 'fixed', left: '-10000px', top: '0', height: 'auto', pointerEvents: 'none' })
+
+  const image = document.createElement('div')
+  image.className = cx('group-drag-image', vertical && 'vertical')
+  shells[shells.length - 1].appendChild(image)
+  for (const part of parts) {
+    const copy = part.cloneNode(true) as HTMLElement
+    Object.assign(copy.style, { width: `${part.getBoundingClientRect().width}px`, flex: 'none' })
+    image.appendChild(copy)
+  }
+  document.body.appendChild(host)
+
+  const at = chip.getBoundingClientRect()
+  const box = image.getBoundingClientRect()
+  const copied = image.firstElementChild!.getBoundingClientRect()
+  e.dataTransfer.setDragImage(image, e.clientX - at.left + copied.left - box.left, e.clientY - at.top + copied.top - box.top)
+  setTimeout(() => host.remove())
+}
+
+/** Where a dragged tab (or site group) would land in a vertical list. */
 interface Drop {
-  /** Its new place in the window. */
+  /** Its new place in the window. For a group, the tab it goes next to. */
   to: number
   /** The group it joins, or null for none. */
   into: string | null
+  /** Which side of `to` a group goes: it never lands inside another group. */
+  place?: 'before' | 'after'
   /** Where the line goes, from the top of the list. */
   top: number
 }
 
+/** How long a dragged tab stays over a collapsed group before the group opens. */
+const EXPAND_DELAY = 1500
+
 /** A list of tabs where tabs from the same site sit together behind a chip that collapses them. */
 export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, renderTab, vertical }: Props): ReactNode {
   const [drop, setDrop] = useState<Drop | null>(null)
+  // The group a dragged tab is over, lit up (vertical lists only).
+  const [overGroup, setOverGroup] = useState<string | null>(null)
+  const hovered = drag.dragId !== null ? overGroup : null
+  useEffect(() => {
+    if (drag.dragId === null) setOverGroup(null)
+  }, [drag.dragId])
+  const hoveredCollapsed = !!hovered && collapsed.includes(hovered)
+  const latest = useRef({ collapsed, setCollapsed })
+  latest.current = { collapsed, setCollapsed }
+  // Held over a collapsed group, the tab opens it. Moving around inside the group doesn't restart the wait.
+  useEffect(() => {
+    if (!hovered || !hoveredCollapsed) return
+    const timer = window.setTimeout(() => {
+      const { collapsed, setCollapsed } = latest.current
+      setCollapsed(collapsed.filter((g) => g !== hovered))
+    }, EXPAND_DELAY)
+    return () => window.clearTimeout(timer)
+  }, [hovered, hoveredCollapsed])
   const peekTimer = useRef<number | undefined>(undefined)
   // Vertically, resting on a collapsed group's chip shows its tabs in a panel beside it.
   const peekSoon = (group: string, chip: HTMLElement): void => {
@@ -114,16 +179,22 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
   const items = runs.map((run) => {
     if ('tab' in run) return renderTab(run.tab)
     const { group, tabs: members } = run
-    const color = state.groupColors[group] ?? colorFor(group)
+    const color = state.groupColors[group] ?? defaultSiteColor(group)
     const open = !collapsed.includes(group)
     const name = state.groupNames[group] ?? group
     // A collapsed group still shows the tab you're on.
     const active = members.find((t) => t.id === state.activeTabId)
     const first = state.tabs.indexOf(members[0])
     return (
-      <div key={`group:${group}`} role="group" aria-label={name} className={cx('tab-group', 'site-group', open && 'open')} style={{ '--group': color } as CSSProperties}>
+      <div
+        key={`group:${group}`}
+        role="group"
+        aria-label={name}
+        className={cx('tab-group', 'site-group', open && 'open', drag.dragGroup === group && 'dragging', hovered === group && 'drop-target')}
+        style={{ '--group': color } as CSSProperties}
+      >
         <button
-          className={cx('group-chip', drag.dragGroup === group && 'dragging')}
+          className="group-chip"
           data-group={group}
           // A collapsed group in the sidebar shows its tabs on hover instead.
           title={vertical && !open ? undefined : `${name} · ${members.length} tabs\nClick to ${open ? 'collapse' : 'expand'}`}
@@ -132,6 +203,7 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = 'move'
             if (vertical) unpeek(true)
+            setGroupDragImage(e, !!vertical)
             drag.startGroup(group)
           }}
           onMouseEnter={(e) => vertical && !open && peekSoon(group, e.currentTarget)}
@@ -160,15 +232,25 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
         </button>
         {vertical
           ? members.map((t, j) => {
-              // The tabs either side of the one that stays out fold away as two drawers: `--i` is a tab's
-              // place in its drawer and `--k` the drawer's size. Every tab is wrapped the same way, so switching
-              // tabs doesn't rebuild them (which would drop a drag that's starting).
+              // The tabs either side of the one that stays out fold away as two drawers. Each tab is told how
+              // many tabs of its drawer are above and below it, and how many of those are taller ones with a
+              // video, so it knows its drawer's extent. Every tab is wrapped the same way, so switching tabs
+              // doesn't rebuild them (which would drop a drag that's starting).
               const at = active ? members.indexOf(active) : members.length
               const stays = j === at
-              const drawer = stays ? {} : j < at ? { '--i': j, '--k': at } : { '--i': j - at - 1, '--k': members.length - at - 1 }
+              const [start, end] = j < at ? [0, at] : [at + 1, members.length]
+              const count = (list: TabState[]): Record<string, number> => ({ n: list.length, m: list.filter(hasMediaBar).length })
+              const above = count(members.slice(start, j))
+              const below = count(members.slice(j + 1, end))
+              const drawer = stays ? {} : { '--above': above.n, '--above-media': above.m, '--below': below.n, '--below-media': below.m }
               const folded = !open && !stays
               return (
-                <div key={t.id} className={cx('group-fold', stays && 'stays', folded && 'folded')} style={drawer as CSSProperties} inert={folded}>
+                <div
+                  key={t.id}
+                  className={cx('group-fold', stays && 'stays', folded && 'folded', hasMediaBar(t) && 'has-media')}
+                  style={drawer as CSSProperties}
+                  inert={folded}
+                >
                   <div className="group-fold-inner">{renderTab(t, color)}</div>
                 </div>
               )
@@ -181,12 +263,38 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
   })
   if (!vertical) return items
 
-  // Dragging an unpinned tab, this list places it (the tabs and chips inside don't).
+  // Dragging an unpinned tab or a group's chip, this list places it (the tabs and chips inside don't).
   const dragged = drag.dragId === null ? undefined : tabs.find((t) => t.id === drag.dragId)
+  const draggedGroup = drag.dragGroup !== null && runs.some((r) => 'group' in r && r.group === drag.dragGroup) ? drag.dragGroup : null
   const shownIn = new Map<number, string>()
   for (const run of runs) if ('group' in run) for (const t of run.tabs) shownIn.set(t.id, run.group)
 
+  // A group goes above or below whatever it's over: a lone tab, or another group as a whole.
+  const groupDropAt = (e: DragEvent<HTMLElement>): Drop | null => {
+    const el = (e.target as Element).closest<HTMLElement>('[data-tab-id], [data-group]')
+    const list = el?.closest('.vtab-list')
+    if (!draggedGroup || !el || !list) return null
+    const over = el.dataset.group ?? shownIn.get(Number(el.dataset.tabId))
+    const index = runs.findIndex((r) => ('group' in r ? r.group === over : r.tab.id === Number(el.dataset.tabId)))
+    const from = runs.findIndex((r) => 'group' in r && r.group === draggedGroup)
+    const run = runs[index]
+    if (!run || index === from) return null
+    // A group's wrapper has no box of its own (display: contents): it spans its chip and the tabs showing.
+    const group = 'group' in run ? el.closest<HTMLElement>('.site-group') : null
+    const boxes = (group ? [...group.children] : [el]).map((c) => c.getBoundingClientRect()).filter((r) => r.height > 0)
+    if (!boxes.length) return null
+    const box = { top: Math.min(...boxes.map((r) => r.top)), bottom: Math.max(...boxes.map((r) => r.bottom)) }
+    const after = e.clientY > (box.top + box.bottom) / 2
+    // Right next to where it already is: nothing would move.
+    if (index + (after ? 1 : 0) === from || index + (after ? 1 : 0) === from + 1) return null
+    const members = 'group' in run ? run.tabs : [run.tab]
+    const anchor = after ? members[members.length - 1] : members[0]
+    const edge = after ? box.bottom + 0.5 : box.top - 0.5
+    return { to: state.tabs.indexOf(anchor), into: null, place: after ? 'after' : 'before', top: edge - list.getBoundingClientRect().top }
+  }
+
   const dropAt = (e: DragEvent<HTMLElement>): Drop | null => {
+    if (draggedGroup) return groupDropAt(e)
     const el = (e.target as Element).closest<HTMLElement>('[data-tab-id], [data-group]')
     const list = el?.closest('.vtab-list')
     if (!dragged || !el || !list) return null
@@ -210,29 +318,39 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
     <div
       className="vtab-drop"
       onDragOverCapture={(e) => {
-        if (!dragged) return
+        if (!dragged && !draggedGroup) return
         e.preventDefault()
+        if (dragged) {
+          // Between rows (the 1px gaps) it's still over the same group.
+          const el = (e.target as Element).closest<HTMLElement>('[data-tab-id], [data-group]')
+          const over = el ? (el.dataset.group ?? shownIn.get(Number(el.dataset.tabId)) ?? null) : overGroup
+          if (over !== overGroup) setOverGroup(over)
+        }
         const next = dropAt(e)
         if (next?.to !== drop?.to || next?.into !== drop?.into || next?.top !== drop?.top) setDrop(next)
       }}
       onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(null)
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+        setDrop(null)
+        setOverGroup(null)
       }}
       onDropCapture={(e) => {
-        if (!dragged) return
+        if (!dragged && !draggedGroup) return
         e.preventDefault()
         e.stopPropagation()
         // Where the line is, so it lands exactly where it said it would.
-        if (drop) window.browserr.tabs.move(dragged.id, drop.to, drop.into)
+        if (drop && dragged) window.browserr.tabs.move(dragged.id, drop.to, drop.into)
+        if (drop && draggedGroup) window.browserr.tabs.moveGroup(draggedGroup, drop.to, drop.place)
         setDrop(null)
+        setOverGroup(null)
         drag.end()
       }}
     >
       {items}
-      {dragged && drop && (
+      {(dragged || draggedGroup) && drop && (
         <div
           className={cx('drop-line', drop.into && 'grouped')}
-          style={{ top: drop.top, '--group': drop.into ? (state.groupColors[drop.into] ?? colorFor(drop.into)) : undefined } as CSSProperties}
+          style={{ top: drop.top, '--group': drop.into ? (state.groupColors[drop.into] ?? defaultSiteColor(drop.into)) : undefined } as CSSProperties}
         />
       )}
     </div>

@@ -4,6 +4,7 @@ import type {
   DownloadState,
   ExtensionPanelInfo,
   FindState,
+  PageEdge,
   Settings,
   SidebarPanel,
   TabLayout,
@@ -13,6 +14,7 @@ import type {
 } from '@shared/types'
 import { cx } from '../ui/util'
 import { FindBar } from './FindBar'
+import { Intro, type IntroMode } from './intro/Intro'
 import { Sidebar } from './Sidebar'
 import { GroupsStrip } from './tabs/GroupsStrip'
 import { LinksProvider } from './tabs/links'
@@ -29,6 +31,22 @@ const EMPTY_STATE: WindowState = {
   profile: null,
   groupNames: {},
   groupColors: {}
+}
+
+/**
+ * Puts the toolbar's colors on the header: the page's main color, and its top edge as a gradient. The
+ * gradient spans only the page, which ends where an open sidebar begins; each color sits in the middle of the
+ * column it was read from. Null clears them.
+ */
+function applyPageEdge(header: HTMLElement, color: string | null, edge: string[] | null, sidebarWidth: number): void {
+  const set = (name: string, value: string | null): void => {
+    if (value) header.style.setProperty(name, value)
+    else header.style.removeProperty(name)
+  }
+  const stops = color && edge?.map((c, i) => `${c} ${(((i + 0.5) / edge.length) * 100).toFixed(2)}%`)
+  set('--page', color)
+  set('--page-edge', stops ? `linear-gradient(to right, ${stops.join(', ')})` : null)
+  set('--page-edge-width', color && sidebarWidth ? `calc(100% - ${sidebarWidth}px)` : null)
 }
 
 export function App(): ReactNode {
@@ -48,6 +66,8 @@ export function App(): ReactNode {
   const [overview, setOverview] = useState(false)
   const [extensions, setExtensions] = useState<ToolbarExtension[]>([])
   const [extensionPanel, setExtensionPanel] = useState<ExtensionPanelInfo | null>(null)
+  const [sidebarWidth, setSidebarWidth] = useState(0)
+  const [intro, setIntro] = useState<IntroMode | null>(() => (api.intro.pending() ? 'setup' : null))
 
   const headerRef = useRef<HTMLElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
@@ -96,6 +116,12 @@ export function App(): ReactNode {
           case 'close-extension-panel':
             setSidebar((current) => (current === 'extension' ? null : current))
             break
+          case 'show-import':
+            setIntro((current) => current ?? 'import')
+            break
+          case 'intro-finished':
+            setIntro((current) => (current === 'setup' ? null : current))
+            break
         }
       })
     ]
@@ -107,12 +133,14 @@ export function App(): ReactNode {
     return () => offs.forEach((off) => off())
   }, [])
 
-  // Tell the main process where the page should go. The tab overview takes the page's place.
+  // Tell the main process where the page should go. The tab overview and the intro take the page's place.
   useLayoutEffect(() => {
     const report = (): void => {
+      const sidebarWidth = Math.round(sidebarRef.current?.getBoundingClientRect().width ?? 0)
+      setSidebarWidth(sidebarWidth)
       api.setInsets({
-        top: overview ? window.innerHeight : Math.round(headerRef.current?.getBoundingClientRect().height ?? 0),
-        right: Math.round(sidebarRef.current?.getBoundingClientRect().width ?? 0),
+        top: overview || intro ? window.innerHeight : Math.round(headerRef.current?.getBoundingClientRect().height ?? 0),
+        right: sidebarWidth,
         left: Math.round(tabsRef.current?.getBoundingClientRect().width ?? 0)
       })
     }
@@ -126,11 +154,42 @@ export function App(): ReactNode {
       observer.disconnect()
       window.removeEventListener('resize', report)
     }
-  }, [sidebar, layout, overview])
+  }, [sidebar, layout, overview, intro])
 
   // Switching the active tab from elsewhere (keyboard, the page) means you're done looking.
   const activeTabId = state.activeTabId
   useEffect(() => setOverview(false), [activeTabId])
+
+  // The toolbar extends the top of the page upward, so it reads as part of the site. While you scroll,
+  // the colors change many times a second, so they come on their own and go straight onto the header, without
+  // re-rendering the browser UI. The tab's state has them too, for when you switch tabs.
+  const activeTab = state.tabs.find((t) => t.id === activeTabId)
+  const liveEdge = useRef<PageEdge | null>(null)
+  const paintEdge = useRef<() => void>(() => {})
+  paintEdge.current = () => {
+    const header = headerRef.current
+    if (!header) return
+    const live = liveEdge.current?.tabId === activeTabId ? liveEdge.current : null
+    const color = live?.color ?? activeTab?.color ?? null
+    applyPageEdge(header, color, live?.edge ?? activeTab?.edge ?? null, sidebarWidth)
+  }
+  useLayoutEffect(() => {
+    liveEdge.current = null
+  }, [activeTabId])
+  useLayoutEffect(() => paintEdge.current(), [activeTabId, activeTab?.color, activeTab?.edge, sidebarWidth])
+  useEffect(
+    () =>
+      api.onPageEdge((edge) => {
+        liveEdge.current = edge
+        paintEdge.current()
+      }),
+    []
+  )
+
+  const closeIntro = (): void => {
+    if (intro === 'setup') api.intro.finish()
+    setIntro(null)
+  }
 
   const toggleSidebar = (panel: SidebarPanel): void => setSidebar((current) => (current === panel ? null : panel))
   const openRoom = (id: string): void => {
@@ -140,7 +199,7 @@ export function App(): ReactNode {
 
   return (
     <LinksProvider tabs={state.tabs} bookmarks={bookmarks}>
-      <div className={cx('chrome', `layout-${layout}`)}>
+      <div className={cx('chrome', `layout-${layout}`, settings?.showTabAge && 'show-tab-age', settings?.showGroupLines && 'show-group-lines')}>
         {layout === 'vertical' && <VerticalTabs ref={tabsRef} state={state} layout={layout} onOpenRoom={openRoom} />}
         <div className="chrome-main">
           <header ref={headerRef} className="chrome-header">
@@ -175,6 +234,7 @@ export function App(): ReactNode {
           </div>
         </div>
       </div>
+      {intro && <Intro mode={intro} onClose={closeIntro} />}
     </LinksProvider>
   )
 }

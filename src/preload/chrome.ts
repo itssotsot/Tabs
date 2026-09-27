@@ -14,12 +14,13 @@ const api: BrowserrAPI = {
     close: (id) => ipcRenderer.send(IPC.tabClose, id),
     activate: (id) => ipcRenderer.send(IPC.tabActivate, id),
     move: (id, toIndex, into) => ipcRenderer.send(IPC.tabMove, id, toIndex, into),
-    moveGroup: (group, toIndex) => ipcRenderer.send(IPC.tabMoveGroup, group, toIndex),
+    moveGroup: (group, toIndex, place) => ipcRenderer.send(IPC.tabMoveGroup, group, toIndex, place),
     peekGroup: (group, anchor) => ipcRenderer.send(IPC.tabPeekGroup, group, anchor),
     unpeekGroup: (now) => ipcRenderer.send(IPC.tabUnpeekGroup, now),
     groupMenu: (group) => ipcRenderer.send(IPC.tabGroupMenu, group),
     contextMenu: (id) => ipcRenderer.send(IPC.tabContextMenu, id),
-    toggleMute: (id) => ipcRenderer.send(IPC.tabToggleMute, id)
+    toggleMute: (id) => ipcRenderer.send(IPC.tabToggleMute, id),
+    media: (id, command) => ipcRenderer.send(IPC.tabMedia, id, command)
   },
   nav: {
     go: (input) => ipcRenderer.send(IPC.navigate, input),
@@ -31,6 +32,7 @@ const api: BrowserrAPI = {
     pasteAndGo: () => ipcRenderer.send(IPC.pasteAndGo)
   },
   onWindowState: (cb) => on(IPC.windowState, cb),
+  onPageEdge: (cb) => on(IPC.pageEdge, cb),
   onCommand: (cb) => on(IPC.command, cb),
   setInsets: (insets) => ipcRenderer.send(IPC.setInsets, insets),
   siteInfoMenu: () => ipcRenderer.send(IPC.siteInfoMenu),
@@ -41,7 +43,8 @@ const api: BrowserrAPI = {
     query: (text) => ipcRenderer.invoke(IPC.omniboxQuery, text),
     show: (items, selected, rect) => ipcRenderer.send(IPC.omniboxShow, items, selected, rect),
     hide: () => ipcRenderer.send(IPC.omniboxHide),
-    onPick: (cb) => on(IPC.omniboxPick, cb)
+    onPick: (cb) => on(IPC.omniboxPick, cb),
+    setAnchor: (anchor) => ipcRenderer.send(IPC.omniboxAnchor, anchor)
   },
   find: {
     start: (text, forward, findNext) => ipcRenderer.send(IPC.findStart, text, forward, findNext),
@@ -87,6 +90,16 @@ const api: BrowserrAPI = {
     menu: (anchor) => ipcRenderer.send(IPC.extensionsMenu, anchor),
     panelBounds: (rect) => ipcRenderer.send(IPC.extensionPanelBounds, rect),
     closePanel: () => ipcRenderer.send(IPC.extensionPanelClose)
+  },
+  intro: {
+    pending: () => ipcRenderer.sendSync(IPC.introPending) === true,
+    finish: () => ipcRenderer.send(IPC.introFinish)
+  },
+  importer: {
+    sources: () => ipcRenderer.invoke(IPC.importSources),
+    preview: (id) => ipcRenderer.invoke(IPC.importPreview, id),
+    run: (id, choice) => ipcRenderer.invoke(IPC.importRun, id, choice),
+    openAccessSettings: () => ipcRenderer.send(IPC.importOpenAccess)
   },
   notify: (n) => ipcRenderer.send(IPC.notify, n),
   setBadge: (count) => ipcRenderer.send(IPC.setBadge, count),

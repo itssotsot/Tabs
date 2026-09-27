@@ -8,8 +8,15 @@ import type {
   FindState,
   GoogleCredential,
   HistoryEntry,
+  ImportChoice,
+  ImportCounts,
+  ImportPreview,
+  ImportSource,
   Insets,
+  MediaCommand,
+  OmniboxAnchor,
   OverlayState,
+  PageEdge,
   Rect,
   Settings,
   ShareDraft,
@@ -32,6 +39,7 @@ export const IPC = {
   tabGroupMenu: 'tab:group-menu',
   tabContextMenu: 'tab:context-menu',
   tabToggleMute: 'tab:toggle-mute',
+  tabMedia: 'tab:media',
   navigate: 'nav:navigate',
   navBack: 'nav:back',
   navForward: 'nav:forward',
@@ -48,6 +56,7 @@ export const IPC = {
   omniboxQuery: 'omnibox:query',
   omniboxShow: 'omnibox:show',
   omniboxHide: 'omnibox:hide',
+  omniboxAnchor: 'omnibox:anchor',
   findStart: 'find:start',
   findStop: 'find:stop',
   bookmarkToggle: 'bookmark:toggle',
@@ -73,9 +82,16 @@ export const IPC = {
   extensionsMenu: 'extensions:menu',
   extensionPanelBounds: 'extensions:panel-bounds',
   extensionPanelClose: 'extensions:panel-close',
+  introPending: 'intro:pending',
+  introFinish: 'intro:finish',
+  importSources: 'import:sources',
+  importPreview: 'import:preview',
+  importRun: 'import:run',
+  importOpenAccess: 'import:open-access',
 
   // main -> chrome
   windowState: 'window:state',
+  pageEdge: 'window:page-edge',
   findState: 'find:state',
   command: 'chrome:command',
   omniboxPick: 'omnibox:pick',
@@ -97,9 +113,12 @@ export const IPC = {
   pageAdblockEnabled: 'page:adblock-enabled',
   pageHoldMedia: 'page:hold-media',
   pageLeaveSharedLink: 'page:leave-shared-link',
+  pageMediaState: 'page:media-state',
+  pageRepainted: 'page:repainted',
 
   // main -> web pages
   pageReleaseMedia: 'page:release-media',
+  pageMediaCommand: 'page:media-command',
 
   // internal pages -> main
   internalHistory: 'internal:history',
@@ -119,7 +138,8 @@ export const IPC = {
   internalExtensionRemove: 'internal:extension-remove',
   internalExtensionOptions: 'internal:extension-options',
   internalOpenWebStore: 'internal:open-web-store',
-  internalExtensionSetPinned: 'internal:extension-set-pinned'
+  internalExtensionSetPinned: 'internal:extension-set-pinned',
+  internalOpenImport: 'internal:open-import'
 } as const
 
 /** Roles the browser UI may put in its own menus; they act on whatever is focused. */
@@ -154,12 +174,14 @@ export interface BrowserrAPI {
     peekGroup(group: string, anchor: Rect): void
     /** The pointer left the chip: the panel closes unless it goes onto the panel. `now` closes it at once. */
     unpeekGroup(now?: boolean): void
-    /** Moves a site group (all its tabs) onto the tab at `toIndex`. */
-    moveGroup(group: string, toIndex: number): void
+    /** Moves a site group (all its tabs) onto the tab at `toIndex`: `place` says which side, else past it in the direction moved. */
+    moveGroup(group: string, toIndex: number, place?: 'before' | 'after'): void
     /** The right-click menu for a site group's chip. */
     groupMenu(group: string): void
     contextMenu(id: number): void
     toggleMute(id: number): void
+    /** Plays, pauses or seeks the tab's video (see TabState.media). */
+    media(id: number, command: MediaCommand): void
   }
   nav: {
     go(input: string): void
@@ -172,6 +194,8 @@ export interface BrowserrAPI {
     pasteAndGo(): void
   }
   onWindowState(cb: (state: WindowState) => void): Unsubscribe
+  /** The active page's top colors changed (see `TabState.edge`). Sent on its own, many times a second while scrolling. */
+  onPageEdge(cb: (edge: PageEdge) => void): Unsubscribe
   onCommand(cb: (cmd: ChromeCommand) => void): Unsubscribe
   setInsets(insets: Insets): void
   siteInfoMenu(): void
@@ -185,6 +209,8 @@ export interface BrowserrAPI {
     show(items: Suggestion[], selected: number, rect: Rect): void
     hide(): void
     onPick(cb: (index: number) => void): Unsubscribe
+    /** Where the address bar is in the window and how it looks, for the send picker to grow out of. */
+    setAnchor(anchor: OmniboxAnchor): void
   }
   find: {
     start(text: string, forward: boolean, findNext: boolean): void
@@ -240,6 +266,21 @@ export interface BrowserrAPI {
     panelBounds(rect: Rect | null): void
     closePanel(): void
   }
+  intro: {
+    /** True until the welcome intro has been finished (or skipped) once. Synchronous, so the first paint is right. */
+    pending(): boolean
+    finish(): void
+  }
+  importer: {
+    /** The browsers on this computer, found afresh each time. */
+    sources(): Promise<ImportSource[]>
+    /** What importing from a source would bring over, or null if Tabs can't read it yet. */
+    preview(id: string): Promise<ImportPreview | null>
+    /** Resolves with how many favorites and pages were added. */
+    run(id: string, choice: ImportChoice): Promise<ImportCounts>
+    /** Opens System Settings at Full Disk Access (for Safari). */
+    openAccessSettings(): void
+  }
   notify(n: AppNotification): void
   setBadge(count: number): void
   /** Opens a page in a new tab. `fromLink` is the key of the shared link it came from, so the tab shows who sent it. */
@@ -277,6 +318,8 @@ export interface InternalAPI {
   openWebStore(): Promise<void>
   /** Shows or hides the extension's button in the toolbar. */
   setExtensionPinned(id: string, pinned: boolean): Promise<ExtensionInfo[]>
+  /** Opens the import step of the welcome intro in this window. */
+  openImport(): Promise<void>
 }
 
 export type { ShareDraft }

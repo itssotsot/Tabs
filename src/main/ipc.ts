@@ -1,7 +1,7 @@
 import { app, clipboard, ipcMain, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { IPC, type DownloadAction } from '@shared/api'
 import { TAB_LAYOUTS } from '@shared/constants'
-import type { AppInfo, AppNotification, Insets, Rect, SearchEngine, Settings, SidebarPanel, Suggestion, TabLayout } from '@shared/types'
+import type { AppInfo, AppNotification, ImportChoice, Insets, MediaCommand, OmniboxAnchor, Rect, SearchEngine, Settings, SidebarPanel, Suggestion, TabLayout, TabMedia } from '@shared/types'
 import { isInternalUrl, pageKey, toNavigableUrl } from '@shared/url'
 import { signInWithGoogle } from './auth'
 import { bookmarksChanged, settingsChanged, toggleBookmark, toggleBookmarkUrl } from './broadcast'
@@ -23,6 +23,7 @@ import {
 } from './extensions'
 import { showAppMenu, showBookmarkContextMenu, showRendererMenu, showSiteInfoMenu, showTabContextMenu, showTabGroupMenu, showTabLayoutMenu } from './menu'
 import { showNotification } from './notifications'
+import { findImportSources, openFullDiskAccessSettings, previewImport, runImport } from './import'
 import { draftFromLink, draftFromUrl } from './share'
 import { omniboxSuggestions } from './omnibox'
 import { enterOmniboxInput, omniboxClosed } from './extensions/omnibox-bridge'
@@ -41,6 +42,17 @@ const isRect = (v: unknown): v is Rect => {
   return !!r && typeof r === 'object' && [r.x, r.y, r.width, r.height].every(isNumber)
 }
 const isWebUrl = (v: unknown): v is string => isString(v) && /^https?:\/\//i.test(v)
+const isMediaCommand = (v: unknown): v is MediaCommand => {
+  const c = v as MediaCommand | null
+  return !!c && typeof c === 'object' && (c.type === 'toggle' || (c.type === 'seek' && isNumber(c.time)))
+}
+/** A page's report on its video (see TabMedia), cleaned up; null if there's none or it doesn't make sense. */
+function tabMedia(v: unknown): TabMedia | null {
+  const m = v as TabMedia | null
+  if (!m || typeof m !== 'object' || ![m.time, m.rate, m.at].every(isNumber)) return null
+  if (m.duration !== null && !(isNumber(m.duration) && m.duration > 0)) return null
+  return { paused: m.paused === true, time: Math.max(0, m.time), duration: m.duration, rate: Math.max(0, m.rate), at: m.at }
+}
 /** A shared link's key: `${roomId}/${messageId}`, maybe with `#n`. */
 const isLinkKey = (v: unknown): v is string => isString(v) && /^[\w-]{1,128}\/[\w-]{1,128}(#\d{1,3})?$/.test(v)
 
@@ -89,7 +101,7 @@ function handleInternalInWindow(channel: string, fn: (c: Controller, ...args: un
 }
 
 const ENGINES: SearchEngine[] = ['google', 'duckduckgo', 'bing', 'brave']
-const BOOLEAN_SETTINGS = ['adblock', 'notifications', 'restoreSession', 'memorySaver', 'groupTabsBySite'] as const
+const BOOLEAN_SETTINGS = ['adblock', 'notifications', 'restoreSession', 'memorySaver', 'groupTabsBySite', 'showTabAge', 'showGroupLines'] as const
 const MAX_UNGROUPED_SITES = 500
 const SITE_RE = /^[a-z0-9.-]{1,253}$/
 
@@ -140,7 +152,9 @@ export function registerIpc(): void {
   onChrome(IPC.tabMove, (c, id, to, into) => {
     if (isNumber(id) && isNumber(to)) c.dragTab(id, to, isString(into) || into === null ? into : undefined)
   })
-  onChrome(IPC.tabMoveGroup, (c, group, to) => isString(group) && isNumber(to) && c.moveGroup(group, to))
+  onChrome(IPC.tabMoveGroup, (c, group, to, place) => {
+    if (isString(group) && isNumber(to)) c.moveGroup(group, to, place === 'before' || place === 'after' ? place : undefined)
+  })
   onChrome(IPC.tabPeekGroup, (c, group, anchor) => isString(group) && isRect(anchor) && c.peekGroup(group, anchor))
   onChrome(IPC.tabUnpeekGroup, (c, now) => c.unpeekGroup(now === true))
   onChrome(IPC.tabGroupMenu, (c, group) => isString(group) && showTabGroupMenu(c, group))
@@ -149,6 +163,9 @@ export function registerIpc(): void {
     if (tab) showTabContextMenu(c, tab)
   })
   onChrome(IPC.tabToggleMute, (c, id) => (isNumber(id) ? c.tabById(id) : undefined)?.toggleMute())
+  onChrome(IPC.tabMedia, (c, id, command) => {
+    if (isNumber(id) && isMediaCommand(command)) void c.tabById(id)?.controlMedia(command)
+  })
   onChrome(IPC.navigate, (c, input) => {
     if (!isString(input) || enterOmniboxInput(input.trim(), 'currentTab')) return
     c.navigate(toNavigableUrl(input, store.settings.searchEngine))
@@ -186,6 +203,25 @@ export function registerIpc(): void {
       // Start connecting to whatever Enter would open, like Chrome's omnibox does.
       const target = (items as Suggestion[])[selected]?.url
       if (isWebUrl(target)) warmUp(webSession(), target, 2)
+    }
+  })
+  onChrome(IPC.omniboxAnchor, (c, anchor) => {
+    const a = anchor as Partial<OmniboxAnchor> | null
+    const color = (v: unknown): v is string => isString(v) && v.length < 1000
+    const size = (v: unknown): v is number => isNumber(v) && v >= 0 && v < 100_000
+    if (
+      a &&
+      isString(a.chromeClass) &&
+      /^[\w -]{1,200}$/.test(a.chromeClass) &&
+      size(a.left) &&
+      size(a.top) &&
+      size(a.before) &&
+      size(a.after) &&
+      color(a.background) &&
+      color(a.foreground)
+    ) {
+      const { chromeClass, left, top, before, after, background, foreground } = a
+      c.setOmniboxAnchor({ chromeClass, left, top, before, after, background, foreground })
     }
   })
   onChrome(IPC.omniboxHide, (c) => {
@@ -243,6 +279,14 @@ export function registerIpc(): void {
     if (leave) c.openTab(url, { active: true, opener: tab })
     e.returnValue = leave
   })
+  ipcMain.on(IPC.pageMediaState, (e, media) => {
+    const tab = controllerFor(e.sender)?.tabFor(e.sender)
+    if (tab && e.senderFrame === e.sender.mainFrame) tab.setMedia(tabMedia(media))
+  })
+  ipcMain.on(IPC.pageRepainted, (e, first) => {
+    const tab = controllerFor(e.sender)?.tabFor(e.sender)
+    if (tab && e.senderFrame === e.sender.mainFrame) tab.pageRepainted(first === true)
+  })
   ipcMain.on(IPC.pageShare, (e) => {
     const c = controllerFor(e.sender)
     const tab = c?.tabFor(e.sender)
@@ -261,6 +305,24 @@ export function registerIpc(): void {
     if (note && isString(note.key) && isString(note.title) && isString(note.body)) showNotification(note, handleNotificationClick)
   })
   onChrome(IPC.setBadge, (_c, count) => isNumber(count) && app.setBadgeCount(Math.max(0, Math.floor(count))))
+
+  // First-run intro and importing from other browsers
+  ipcMain.on(IPC.introPending, (e) => {
+    // BROWSERR_INTRO=1 shows it on every launch of a development build, for working on it.
+    const forced = !app.isPackaged && process.env.BROWSERR_INTRO === '1'
+    e.returnValue = !!chromeOf(e) && (forced || !store.introDone)
+  })
+  onChrome(IPC.introFinish, () => {
+    store.finishIntro()
+    for (const w of BrowserWindowController.all) w.sendCommand({ type: 'intro-finished' })
+  })
+  handleChrome(IPC.importSources, () => findImportSources())
+  handleChrome(IPC.importPreview, (_c, id) => previewImport(id))
+  handleChrome(IPC.importRun, (_c, id, choice) => {
+    const c = choice as ImportChoice | null
+    return runImport(id, { favorites: c?.favorites === true, history: c?.history === true })
+  })
+  onChrome(IPC.importOpenAccess, () => openFullDiskAccessSettings())
 
   // Updates
   handleChrome(IPC.updateGet, () => pendingUpdate())
@@ -347,4 +409,5 @@ export function registerIpc(): void {
     if (url) c.createTab(url)
   })
   handleInternalInWindow(IPC.internalOpenWebStore, (c) => void c.createTab(WEB_STORE_URL))
+  handleInternalInWindow(IPC.internalOpenImport, (c) => c.sendCommand({ type: 'show-import' }))
 }

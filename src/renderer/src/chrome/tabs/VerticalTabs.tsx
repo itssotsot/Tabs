@@ -1,4 +1,4 @@
-import { Archive, ChevronRight, MessagesSquare, RotateCcw, Volume2, VolumeX, X } from 'lucide-react'
+import { Archive, ChevronRight, MessagesSquare, RotateCcw, X } from 'lucide-react'
 import { forwardRef, useRef, useState, type ReactNode } from 'react'
 import type { TabLayout, TabState, WindowState } from '@shared/types'
 import { roomTitle, useSocial } from '../../social/SocialProvider'
@@ -6,7 +6,8 @@ import { RoomAvatar } from '../../ui/Avatar'
 import { popupMenu } from '../../ui/menu'
 import { cx, timeAgo } from '../../ui/util'
 import { pageKey, useLinks, type SharedLink } from './links'
-import { LayoutButton, LinkIcon, linkTooltip, NewTabButton, StarButton, TabIcon, TabItem, useLinkCaption, useLinkMenu, useStoredState, useTabDrag } from './parts'
+import { hasMediaBar, MediaButton, MediaProgress, MuteButton } from './media'
+import { LayoutButton, LinkIcon, linkTooltip, MarqueeText, NewTabButton, StarButton, TabIcon, TabItem, useLinkCaption, useLinkMenu, useStoredState, useTabDrag } from './parts'
 import { closeGroupPeek, SiteGroupedTabs, siteGroups, useCollapsedSites } from './SiteGroups'
 
 const ROOM_PREVIEW = 4
@@ -78,20 +79,18 @@ export const VerticalTabs = forwardRef<HTMLElement, Props>(function VerticalTabs
   const toggle = (id: string): void => setCollapsed(collapsed.includes(id) ? collapsed.filter((c) => c !== id) : [...collapsed, id])
   const isCollapsed = (id: string): boolean => collapsed.includes(id)
 
+  // Collapses every site group if any is open, else expands them all.
+  const groups = siteGroups(unpinned)
+  const anyOpen = groups.some((g) => !collapsedSites.includes(g))
+  const allGroupsLabel = anyOpen || groups.length === 0 ? 'Collapse all groups' : 'Expand all groups'
+  const toggleAllGroups = (): void =>
+    setCollapsedSites(anyOpen ? [...new Set([...collapsedSites, ...groups])] : collapsedSites.filter((g) => !groups.includes(g)))
+
   // Right-clicking the Tabs section (but not a tab or a group, which have their own menus).
   const tabsMenu = (e: React.MouseEvent): void => {
     if (e.defaultPrevented) return
     e.preventDefault()
-    const groups = siteGroups(unpinned)
-    const anyOpen = groups.some((g) => !collapsedSites.includes(g))
-    void popupMenu([
-      {
-        label: anyOpen || groups.length === 0 ? 'Collapse all groups' : 'Expand all groups',
-        enabled: groups.length > 0,
-        run: () =>
-          setCollapsedSites(anyOpen ? [...new Set([...collapsedSites, ...groups])] : collapsedSites.filter((g) => !groups.includes(g))),
-      },
-    ])
+    void popupMenu([{ label: allGroupsLabel, enabled: groups.length > 0, run: toggleAllGroups }])
   }
 
   return (
@@ -225,7 +224,10 @@ export const VerticalTabs = forwardRef<HTMLElement, Props>(function VerticalTabs
 
         <section className="vtabs-section" onContextMenu={tabsMenu}>
           <h4>
-            Tabs <span className="vtabs-count">{unpinned.length}</span>
+            {/* Clicking the heading does what its right-click menu does. */}
+            <button className="vtabs-heading" title={groups.length ? allGroupsLabel : undefined} disabled={!groups.length} onClick={toggleAllGroups}>
+              Tabs <span className="vtabs-count">{unpinned.length}</span>
+            </button>
           </h4>
           <div className="vtab-list" role="tablist">
             <SiteGroupedTabs
@@ -318,7 +320,7 @@ function LinkRow({ link, tab, active, onOpen, onArchive }: LinkRowProps): ReactN
     <div
       role="tab"
       aria-selected={active}
-      className={cx('vlink', active && 'active', tab && 'is-open', tab?.sleeping && 'sleeping', !link.opened && 'fresh')}
+      className={cx('vlink', active && 'active', tab && 'is-open', tab?.sleeping && 'sleeping', !link.opened && 'fresh', tab && hasMediaBar(tab) && 'has-media')}
       title={tab ? `${title}\n${url}\n${caption(link)}` : linkTooltip(link, caption(link))}
       onMouseDown={(e) => {
         if (e.button === 0) openHere(e.metaKey || e.ctrlKey)
@@ -335,16 +337,12 @@ function LinkRow({ link, tab, active, onOpen, onArchive }: LinkRowProps): ReactN
       }}
     >
       <LinkIcon url={url} link={link} favicon={tab ? <TabIcon tab={tab} /> : undefined} />
-      <span className="vlink-title">{title}</span>
-      {tab && (tab.audible || tab.muted) && (
-        <button
-          className="tab-audio"
-          title={tab.muted ? 'Unmute tab' : 'Mute tab'}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => tabs.toggleMute(tab.id)}
-        >
-          {tab.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-        </button>
+      <MarqueeText className="vlink-title" text={title} />
+      {tab && (
+        <span className="tab-actions">
+          <MuteButton tab={tab} animated />
+          <MediaButton tab={tab} />
+        </span>
       )}
       <span className="vlink-time">{timeAgo(link.createdAt)}</span>
       <StarButton url={url} title={title} className="vlink-star" />
@@ -356,6 +354,7 @@ function LinkRow({ link, tab, active, onOpen, onArchive }: LinkRowProps): ReactN
       >
         <X size={13} strokeWidth={2.25} />
       </button>
+      {tab && <MediaProgress tab={tab} />}
     </div>
   )
 }

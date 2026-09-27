@@ -4,12 +4,13 @@ import {
   type BrowserWindow,
   type ContextMenuParams,
   type Input,
+  type NativeImage,
   type NavigationEntry,
   type Result,
   type WebContents
 } from 'electron'
 import { IPC } from '@shared/api'
-import type { TabLink, TabState } from '@shared/types'
+import type { MediaCommand, TabLink, TabMedia, TabState } from '@shared/types'
 import { INTERNAL_SCHEME, isInternalUrl, NEW_TAB_URL, pageKey, prettyUrl } from '@shared/url'
 import { tabPreload, webSession } from './env'
 import { browserEvents } from './browser-events'
@@ -23,6 +24,8 @@ import { store, type SavedTab } from './store'
 export interface TabHost {
   readonly win: BrowserWindow
   onTabUpdated(tab: Tab): void
+  /** The colors along the top of the tab's page changed. They change often while scrolling, so they skip the full tab update. */
+  onTabEdge(tab: Tab, edge: { color: string; edge: string[] }): void
   onWebContentsCreated(tab: Tab, wc: WebContents): void
   onWebContentsDestroyed(tab: Tab, wc: WebContents): void
   openTab(url: string, options: { active: boolean; opener: Tab }): void
@@ -49,6 +52,93 @@ const MAX_HISTORY_ENTRIES = 50
 
 let nextTabId = 1
 
+/** The shortest time between reads of the page's top colors, about a frame: scrolling asks for one every frame. */
+const MIN_SAMPLE_GAP_MS = 16
+/** The longest a read of the page's top colors waits for the page to draw. */
+const CAPTURE_TIMEOUT_MS = 500
+/** How long after the last scroll the page's top colors are read again. */
+const SCROLL_SETTLE_MS = [80, 400]
+/** After a page first paints, when to read its top color again, as its header finishes drawing. */
+const FOLLOW_UP_SAMPLES_MS = [200, 600, 1500]
+
+/** Whether two #rrggbb colors look the same. Pages that fade their background shouldn't redraw the toolbar every frame. */
+function sameColor(a: string, b: string | null): boolean {
+  if (!b) return false
+  for (let i = 1; i < 7; i += 2) if (Math.abs(parseInt(a.slice(i, i + 2), 16) - parseInt(b.slice(i, i + 2), 16)) > 3) return false
+  return true
+}
+
+/** How many colors are read across the top of the page, left to right. Few enough that each is a soft, blurry column. */
+const EDGE_STOPS = 32
+/** How tall a band along the top is read: a band rather than the top row, so a thin accent stripe (Stack Overflow's) doesn't win. */
+const EDGE_BAND = 12
+
+interface ColorBucket {
+  n: number
+  r: number
+  g: number
+  b: number
+}
+
+/**
+ * Finds the most common color in a set of pixels, so a logo or a line of text doesn't tint it.
+ * Pixels are grouped by their top 4 bits per channel, and the biggest group's average wins.
+ */
+class ColorCounter {
+  private readonly buckets = new Map<number, ColorBucket>()
+  private best: ColorBucket | null = null
+
+  add(r: number, g: number, b: number): void {
+    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4)
+    let bucket = this.buckets.get(key)
+    if (!bucket) this.buckets.set(key, (bucket = { n: 0, r: 0, g: 0, b: 0 }))
+    bucket.n++
+    bucket.r += r
+    bucket.g += g
+    bucket.b += b
+    if (!this.best || bucket.n > this.best.n) this.best = bucket
+  }
+
+  get color(): string | null {
+    const best = this.best
+    if (!best) return null
+    const hex = (sum: number): string => Math.round(sum / best.n).toString(16).padStart(2, '0')
+    return `#${hex(best.r)}${hex(best.g)}${hex(best.b)}`
+  }
+}
+
+/** The top of the page: its most common color, and the most common color in each column across it. */
+function readEdge(image: NativeImage): { color: string; edge: string[] } | null {
+  if (image.isEmpty()) return null
+  // BGRA, the native order on macOS and Windows. The bitmap is in device pixels, so its row width comes from its length.
+  const px = image.toBitmap()
+  const size = image.getSize()
+  const scale = Math.sqrt(px.length / 4 / (size.width * size.height))
+  const rowWidth = Math.round(size.width * scale)
+  if (!rowWidth) return null
+  const rows = Math.floor(px.length / 4 / rowWidth)
+  // One pixel per point is plenty: this runs every frame while scrolling, and Retina has four times as many.
+  const step = Math.max(1, Math.round(scale))
+  const overall = new ColorCounter()
+  const columns = Array.from({ length: EDGE_STOPS }, () => new ColorCounter())
+  for (let y = 0; y < rows; y += step) {
+    for (let x = 0; x < rowWidth; x += step) {
+      const i = (y * rowWidth + x) * 4
+      const b = px[i]
+      const g = px[i + 1]
+      const r = px[i + 2]
+      overall.add(r, g, b)
+      columns[Math.min(EDGE_STOPS - 1, Math.floor((x * EDGE_STOPS) / rowWidth))].add(r, g, b)
+    }
+  }
+  const color = overall.color
+  return color ? { color, edge: columns.map((c) => c.color ?? color) } : null
+}
+
+function sameEdge(a: string[], b: string[] | null): boolean {
+  return !!b && a.length === b.length && a.every((c, i) => sameColor(c, b[i]))
+}
+
 /** Keeps at most `max` entries around `index`, returning the new list and index. */
 function trimHistory(entries: NavigationEntry[], index: number, max: number): { entries: NavigationEntry[]; index: number } {
   if (entries.length <= max) return { entries, index }
@@ -65,7 +155,7 @@ export class Tab implements Groupable {
   pinned = false
   pulledOutOf: string | null = null
   joinedGroup: string | null = null
-  /** When the tab was opened. Restored and reopened tabs keep theirs. */
+  /** When the tab was opened. Tabs restored at startup keep theirs; a reopened closed tab starts again. */
   createdAt = Date.now()
   /** The link from a chat this tab was opened from. */
   fromLink: TabLink | null = null
@@ -90,6 +180,19 @@ export class Tab implements Groupable {
   private siteCache: { url: string; site: string | null } | null = null
   /** An extension's page standing in for the new tab page (chrome_url_overrides), while it's showing. */
   private newTabPage: string | null = null
+  /** The page's video, as its preload last reported it. */
+  private media: TabMedia | null = null
+  /** The top of the page, which the toolbar extends: its main color, and its colors left to right. */
+  private pageColor: string | null = null
+  private pageEdge: string[] | null = null
+  /** False between a navigation committing and its page being ready, when the view still shows a blank page. */
+  private painted = false
+  private sampling = false
+  /** A read was asked for while one was running: do another when it's done, so the last scroll position is never missed. */
+  private resample = false
+  private lastSampleAt = 0
+  private sampleTimer: NodeJS.Timeout | null = null
+  private settleTimers: NodeJS.Timeout[] = []
 
   constructor(
     private readonly host: TabHost,
@@ -198,6 +301,7 @@ export class Tab implements Groupable {
       canGoForward: wc ? wc.navigationHistory.canGoForward() : (snap?.index ?? 0) < (snap?.entries?.length ?? 1) - 1,
       audible: this.audible,
       muted: this.muted,
+      media: wc ? this.media : null,
       pinned: this.pinned,
       zoomPercent: wc ? Math.round(wc.getZoomFactor() * 100) : 100,
       // Extension pages come from the extension's own files, like browserr:// pages.
@@ -205,7 +309,70 @@ export class Tab implements Groupable {
       internal: this.isInternal,
       sleeping: !wc,
       fromLink: this.fromLink,
-      createdAt: this.createdAt
+      createdAt: this.createdAt,
+      color: this.pageColor,
+      edge: this.pageEdge
+    }
+  }
+
+  /** The page painted for the first time, or scrolled: the top of it may be a new color. */
+  pageRepainted(first: boolean): void {
+    if (!first) {
+      void this.sampleColor()
+      // More reads once scrolling settles: in case the last one caught the frame before, and for sites that
+      // switch their header's color a moment after you stop (with no animation to tell us).
+      for (const timer of this.settleTimers) clearTimeout(timer)
+      this.settleTimers = SCROLL_SETTLE_MS.map((ms) => setTimeout(() => void this.sampleColor(), ms))
+      return
+    }
+    this.painted = true
+    void this.sampleColor()
+    // Many sites draw their header with scripts just after the first paint.
+    for (const ms of FOLLOW_UP_SAMPLES_MS) setTimeout(() => void this.sampleColor(), ms)
+  }
+
+  /**
+   * Reads the colors along the top of the page, for the toolbar to extend upward.
+   * Only works while the tab is on screen, so the window calls it for its active tab.
+   */
+  async sampleColor(): Promise<void> {
+    const wc = this.liveWc
+    if (!wc || wc.isDestroyed() || !this.painted) return
+    if (this.sampling) return void (this.resample = true)
+    const wait = this.lastSampleAt + MIN_SAMPLE_GAP_MS - Date.now()
+    if (wait > 0) {
+      this.sampleTimer ??= setTimeout(() => {
+        this.sampleTimer = null
+        void this.sampleColor()
+      }, wait)
+      return
+    }
+    const { width } = this.view.getBounds()
+    if (!width) return
+    this.sampling = true
+    this.lastSampleAt = Date.now()
+    try {
+      // A capture waits for the page's next frame, and a window that's fully covered draws none: give up rather
+      // than hold up every read after it.
+      const image = await Promise.race([
+        wc.capturePage({ x: 0, y: 0, width, height: EDGE_BAND }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), CAPTURE_TIMEOUT_MS))
+      ])
+      if (!image) return
+      const read = readEdge(image)
+      if (read && !(sameColor(read.color, this.pageColor) && sameEdge(read.edge, this.pageEdge))) {
+        this.pageColor = read.color
+        this.pageEdge = read.edge
+        this.host.onTabEdge(this, read)
+      }
+    } catch {
+      // The page went away mid-capture.
+    } finally {
+      this.sampling = false
+      if (this.resample) {
+        this.resample = false
+        void this.sampleColor()
+      }
     }
   }
 
@@ -291,6 +458,7 @@ export class Tab implements Groupable {
     this.loading = false
     this.failedUrl = null
     this.frozen = false
+    this.media = null
     wc.close()
     this.host.onTabUpdated(this)
     return true
@@ -367,6 +535,19 @@ export class Tab implements Groupable {
     this.host.onTabUpdated(this)
   }
 
+  /** What the page's player reported: its video's state, or null when there's none. */
+  setMedia(media: TabMedia | null): void {
+    this.media = media
+    this.host.onTabUpdated(this)
+  }
+
+  async controlMedia(command: MediaCommand): Promise<void> {
+    if (!this.media) return
+    // A paused video's tab may have been frozen to save power.
+    await this.thaw()
+    this.liveWc?.send(IPC.pageMediaCommand, command)
+  }
+
   toggleDevTools(): void {
     if (this.wc.isDevToolsOpened()) this.wc.closeDevTools()
     else this.wc.openDevTools({ mode: 'detach' })
@@ -401,13 +582,21 @@ export class Tab implements Groupable {
       this.loading = false
       update()
       browserEvents.emit('tab-loading', this, false)
+      void this.sampleColor()
+    })
+    wc.on('dom-ready', () => {
+      this.painted = true
+      // Give the page a moment to paint its header.
+      setTimeout(() => void this.sampleColor(), 150)
     })
     wc.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument) onNavigationStart(wc.session, details.url)
     })
     wc.on('did-navigate', (_e, url) => {
+      this.painted = false
       if (!url.startsWith(`${INTERNAL_SCHEME}://${ERROR_HOST}/`)) this.failedUrl = null
       this.favicon = null
+      this.media = null
       if (this.fromLink && !this.linkLanded && !isInternalUrl(url)) {
         this.fromLink = { ...this.fromLink, landedUrl: url }
         this.linkLanded = true
@@ -420,6 +609,7 @@ export class Tab implements Groupable {
       store.recordVisit(url, wc.getTitle())
       learnName()
       update()
+      setTimeout(() => void this.sampleColor(), 150)
     })
     wc.on('page-title-updated', (_e, title) => {
       store.updateTitle(wc.getURL(), title)
@@ -440,6 +630,7 @@ export class Tab implements Groupable {
     wc.on('render-process-gone', (_e, details) => {
       if (details.reason === 'clean-exit') return
       this.loading = false
+      this.media = null
       this.showError(this.url, 'crashed', 'This page crashed.')
     })
 

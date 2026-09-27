@@ -1,4 +1,4 @@
-import { ArrowDownToLine, ArrowLeft, ArrowRight, CircleArrowUp, MessagesSquare, MoreVertical, RotateCw, Send, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeft, ArrowRight, CircleArrowUp, MoreVertical } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { DownloadState, SidebarPanel, ToolbarExtension, UpdateReady, WindowState } from '@shared/types'
 import { useSocial } from '../social/SocialProvider'
@@ -20,7 +20,7 @@ export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar, ex
   const api = window.browserr
   const { user, profile, unreadCount, incoming } = useSocial()
   const tab = state.tabs.find((t) => t.id === state.activeTabId) ?? null
-  const canShare = !!tab && !tab.internal && !!tab.url
+  const social = sidebar === 'inbox' || sidebar === 'friends' ? sidebar : null
 
   const active = downloads.filter((d) => d.state === 'progressing')
   const progress = active.length
@@ -35,29 +35,10 @@ export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar, ex
       <button className="icon-btn" disabled={!tab?.canGoForward} title="Forward" onClick={() => api.nav.forward()}>
         <ArrowRight size={17} />
       </button>
-      {tab?.loading ? (
-        <button className="icon-btn" title="Stop loading" onClick={() => api.nav.stop()}>
-          <X size={17} />
-        </button>
-      ) : (
-        <button className="icon-btn" title={`Reload (${shortcut('⌘R', 'Ctrl+R')})`} onClick={() => api.nav.reload()}>
-          <RotateCw size={15} />
-        </button>
-      )}
 
       <Omnibox tab={tab} isBookmarked={state.isBookmarked} />
 
       <ExtensionButtons extensions={extensions} />
-
-      <button
-        className="send-btn"
-        disabled={!canShare}
-        title={`Send to a friend (${shortcut('⌘⇧S', 'Ctrl+Shift+S')})`}
-        onClick={() => api.share.openPicker()}
-      >
-        <Send size={15} />
-        <span>Send</span>
-      </button>
 
       {downloads.length > 0 && (
         <button
@@ -74,22 +55,18 @@ export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar, ex
         </button>
       )}
 
+      {/* Opens the inbox; Friends is a tab beside it in the sidebar. Closes the sidebar if either is showing. */}
       <button
-        className={cx('icon-btn', sidebar === 'inbox' && 'pressed')}
-        title={`Inbox (${shortcut('⌘⇧L', 'Ctrl+Shift+L')})`}
-        onClick={() => onToggleSidebar('inbox')}
+        className={cx('icon-btn avatar-btn', social && 'pressed')}
+        title={`${profile ? `@${profile.username}` : 'Sign in'} · Inbox (${shortcut('⌘⇧L', 'Ctrl+Shift+L')})`}
+        onClick={() => onToggleSidebar(social ?? 'inbox')}
       >
-        <MessagesSquare size={17} />
-        {unreadCount > 0 && <span className="badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
-      </button>
-
-      <button
-        className={cx('icon-btn avatar-btn', sidebar === 'friends' && 'pressed')}
-        title={profile ? `@${profile.username}` : 'Sign in'}
-        onClick={() => onToggleSidebar('friends')}
-      >
-        {user ? <Avatar profile={profile ?? null} photoURL={user.photoURL} size={22} /> : <Avatar profile={null} size={22} />}
-        {incoming.length > 0 && <span className="badge dot" />}
+        {user ? <Avatar profile={profile ?? null} photoURL={user.photoURL} size={28} /> : <Avatar profile={null} size={28} />}
+        {unreadCount > 0 ? (
+          <span className="badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+        ) : (
+          incoming.length > 0 && <span className="badge dot" />
+        )}
       </button>
 
       {update && (
