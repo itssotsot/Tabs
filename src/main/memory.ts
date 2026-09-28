@@ -24,7 +24,8 @@ function originOf(url: string): string | null {
 
 /** Tabs that must keep running in the background. */
 function mustStayAwake(tab: Tab): boolean {
-  if (tab.pinned || tab.audible) return true
+  // A call goes quiet when nobody talks, and pausing its tab would drop it.
+  if (tab.pinned || tab.audible || tab.inCall) return true
   const wc = tab.liveWc
   if (!wc || wc.isDevToolsOpened()) return true
   // A popup it opened (e.g. "Sign in with Google") would lose its window.opener.

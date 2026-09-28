@@ -100,8 +100,9 @@ function send(event: string, details: Record<string, unknown>): void {
   emit(`webNavigation.${event}`, [details])
 }
 
-function frameFromIds(wc: WebContents, processId: number, routingId: number, isMainFrame: boolean): WebFrameMain | null {
-  const frame = webFrameMain.fromId(processId, routingId)
+function frameFromIds(wc: WebContents, processId: number | undefined, routingId: number | undefined, isMainFrame: boolean): WebFrameMain | null {
+  // A load that fails before it starts (an invalid URL) comes with no ids, and fromId throws without them.
+  const frame = Number.isInteger(processId) && Number.isInteger(routingId) ? webFrameMain.fromId(processId!, routingId!) : undefined
   if (alive(frame)) return frame
   return isMainFrame && !wc.isDestroyed() ? wc.mainFrame : null
 }

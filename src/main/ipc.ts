@@ -1,8 +1,10 @@
 import { app, clipboard, ipcMain, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
-import { IPC, type DownloadAction } from '@shared/api'
-import { TAB_LAYOUTS } from '@shared/constants'
-import type { AppInfo, AppNotification, ImportChoice, Insets, MediaCommand, OmniboxAnchor, Rect, SearchEngine, Settings, SidebarPanel, Suggestion, TabLayout, TabMedia } from '@shared/types'
-import { isInternalUrl, pageKey, toNavigableUrl } from '@shared/url'
+import { IPC, type DownloadAction, type PageAdblock } from '@shared/api'
+import { SITE_PERMISSIONS, TAB_LAYOUTS, THEMES } from '@shared/constants'
+import type { AppInfo, AppNotification, CallDevice, CallState, CaptureDevice, DeviceChoice, ImportChoice, Insets, MediaCommand, OmniboxAnchor, PermissionAnswer, PermissionDecision, Rect, SearchEngine, Settings, SidebarPanel, SitePermission, Suggestion, TabCapture, TabLayout, TabMedia, ThemeId } from '@shared/types'
+import { pageKey } from '@shared/links'
+import { isInternalUrl, toNavigableUrl } from '@shared/url'
+import { blocksAdsOn, scriptletsFor } from './adblock'
 import { signInWithGoogle } from './auth'
 import { bookmarksChanged, settingsChanged, toggleBookmark, toggleBookmarkUrl } from './broadcast'
 import { downloadAction, listDownloads } from './downloads'
@@ -21,7 +23,9 @@ import {
   toolbarFor,
   WEB_STORE_URL
 } from './extensions'
-import { showAppMenu, showBookmarkContextMenu, showRendererMenu, showSiteInfoMenu, showTabContextMenu, showTabGroupMenu, showTabLayoutMenu } from './menu'
+import { showAppMenu, showBookmarkContextMenu, showCaptureMenu, showRendererMenu, showSiteInfoMenu, showTabContextMenu, showTabGroupMenu } from './menu'
+import { answerPrompt } from './permission-prompts'
+import { devicesFor, permissionStates } from './permissions'
 import { showNotification } from './notifications'
 import { findImportSources, openFullDiskAccessSettings, previewImport, runImport } from './import'
 import { draftFromLink, draftFromUrl } from './share'
@@ -45,6 +49,14 @@ const isWebUrl = (v: unknown): v is string => isString(v) && /^https?:\/\//i.tes
 const isMediaCommand = (v: unknown): v is MediaCommand => {
   const c = v as MediaCommand | null
   return !!c && typeof c === 'object' && (c.type === 'toggle' || (c.type === 'seek' && isNumber(c.time)))
+}
+const isCallDevice = (v: unknown): v is CallDevice => v === 'mic' || v === 'camera'
+/** A page's report on its call's own controls (see CallState); null if it's not in one or the report doesn't make sense. */
+function callState(v: unknown): CallState | null {
+  const c = v as CallState | null
+  const isState = (x: unknown): x is boolean | null => x === null || typeof x === 'boolean'
+  if (!c || typeof c !== 'object' || !isState(c.mic) || !isState(c.camera) || (c.mic === null && c.camera === null)) return null
+  return { mic: c.mic, camera: c.camera }
 }
 /** A page's report on its video (see TabMedia), cleaned up; null if there's none or it doesn't make sense. */
 function tabMedia(v: unknown): TabMedia | null {
@@ -104,6 +116,30 @@ const ENGINES: SearchEngine[] = ['google', 'duckduckgo', 'bing', 'brave']
 const BOOLEAN_SETTINGS = ['adblock', 'notifications', 'restoreSession', 'memorySaver', 'groupTabsBySite', 'showTabAge', 'showGroupLines'] as const
 const MAX_UNGROUPED_SITES = 500
 const SITE_RE = /^[a-z0-9.-]{1,253}$/
+const ORIGIN_RE = /^https?:\/\/[^\s/]{1,253}$/
+const MAX_DEVICE_NAME = 200
+
+const isSitePermission = (v: unknown): v is SitePermission => isString(v) && v in SITE_PERMISSIONS
+const isCaptureDevice = (v: unknown): v is CaptureDevice => v === 'camera' || v === 'microphone' || v === 'screen'
+const deviceName = (v: unknown): string | null => (isString(v) && v.length > 0 && v.length <= MAX_DEVICE_NAME ? v : null)
+function deviceChoice(v: unknown): DeviceChoice | null {
+  if (!v || typeof v !== 'object') return null
+  const d = v as Record<string, unknown>
+  return { camera: deviceName(d.camera), microphone: deviceName(d.microphone), speaker: deviceName(d.speaker) }
+}
+function permissionAnswer(v: unknown): PermissionAnswer | null {
+  const a = v as PermissionAnswer | null
+  if (!a || typeof a !== 'object' || !isNumber(a.id)) return null
+  if (a.decision === 'open-system-settings') return { id: a.id, decision: a.decision }
+  if (!['once', 'always', 'block', 'dismiss'].includes(a.decision)) return null
+  const devices = 'devices' in a ? deviceChoice(a.devices) : null
+  return { id: a.id, decision: a.decision, ...(devices && { devices }) }
+}
+/** A page's report on the devices it uses (see TabCapture). */
+function tabCapture(v: unknown): TabCapture {
+  const c = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+  return { camera: c.camera === true, microphone: c.microphone === true, screen: c.screen === true }
+}
 
 function sanitizeSettings(patch: unknown): Partial<Settings> {
   const out: Partial<Settings> = {}
@@ -111,7 +147,11 @@ function sanitizeSettings(patch: unknown): Partial<Settings> {
   const p = patch as Record<string, unknown>
   if (ENGINES.includes(p.searchEngine as SearchEngine)) out.searchEngine = p.searchEngine as SearchEngine
   if (TAB_LAYOUTS.some((l) => l.id === p.tabLayout)) out.tabLayout = p.tabLayout as TabLayout
+  if (THEMES.some((t) => t.id === p.theme)) out.theme = p.theme as ThemeId
   for (const key of BOOLEAN_SETTINGS) if (typeof p[key] === 'boolean') out[key] = p[key] as boolean
+  if (Array.isArray(p.blockedPermissions)) out.blockedPermissions = [...new Set(p.blockedPermissions.filter(isSitePermission))]
+  const devices = deviceChoice(p.devices)
+  if (devices) out.devices = devices
   if (Array.isArray(p.ungroupedSites)) {
     const sites = p.ungroupedSites.filter((s): s is string => isString(s) && SITE_RE.test(s))
     out.ungroupedSites = [...new Set(sites)].slice(0, MAX_UNGROUPED_SITES)
@@ -166,6 +206,12 @@ export function registerIpc(): void {
   onChrome(IPC.tabMedia, (c, id, command) => {
     if (isNumber(id) && isMediaCommand(command)) void c.tabById(id)?.controlMedia(command)
   })
+  onChrome(IPC.tabStopCapture, (c, id, device) => {
+    if (isNumber(id) && isCaptureDevice(device)) c.tabById(id)?.stopCapture(device)
+  })
+  onChrome(IPC.tabCall, (c, id, device) => {
+    if (isNumber(id) && isCallDevice(device)) c.tabById(id)?.controlCall(device)
+  })
   onChrome(IPC.navigate, (c, input) => {
     if (!isString(input) || enterOmniboxInput(input.trim(), 'currentTab')) return
     c.navigate(toNavigableUrl(input, store.settings.searchEngine))
@@ -191,8 +237,8 @@ export function registerIpc(): void {
     }
   })
   onChrome(IPC.siteInfoMenu, (c) => showSiteInfoMenu(c))
+  onChrome(IPC.captureMenu, (c) => showCaptureMenu(c))
   onChrome(IPC.appMenu, (c, x, y) => isNumber(x) && isNumber(y) && showAppMenu(c, x, y))
-  onChrome(IPC.tabLayoutMenu, (c, x, y) => isNumber(x) && isNumber(y) && showTabLayoutMenu(c, x, y))
   handleChrome(IPC.showMenu, (c, items) => showRendererMenu(c, items))
 
   // Address bar
@@ -265,8 +311,10 @@ export function registerIpc(): void {
     const tab = [...BrowserWindowController.all].flatMap((w) => w.allTabs).find((t) => t.loaded && same(t.url) === same(url))
     return draftFromUrl(url, tab)
   })
-  ipcMain.on(IPC.pageAdblockEnabled, (e) => {
-    e.returnValue = store.settings.adblock
+  ipcMain.on(IPC.pageAdblock, (e, url) => {
+    if (!store.settings.adblock || !isWebUrl(url) || !blocksAdsOn(url)) return void (e.returnValue = null)
+    const adblock: PageAdblock = { scriptlets: scriptletsFor(e.sender.session, url) }
+    e.returnValue = adblock
   })
   ipcMain.on(IPC.pageHoldMedia, (e) => {
     e.returnValue = controllerFor(e.sender)?.tabFor(e.sender)?.holdingMedia === true
@@ -283,14 +331,24 @@ export function registerIpc(): void {
     const tab = controllerFor(e.sender)?.tabFor(e.sender)
     if (tab && e.senderFrame === e.sender.mainFrame) tab.setMedia(tabMedia(media))
   })
+  ipcMain.on(IPC.pageCallState, (e, call) => {
+    const tab = controllerFor(e.sender)?.tabFor(e.sender)
+    if (tab && e.senderFrame === e.sender.mainFrame) tab.setCall(callState(call))
+  })
+  ipcMain.on(IPC.pageCapture, (e, capture) => {
+    controllerFor(e.sender)?.tabFor(e.sender)?.setCapture(e.processId, e.frameId, tabCapture(capture))
+  })
+  ipcMain.handle(IPC.pagePermissionStates, (e) => {
+    const url = e.senderFrame?.url
+    return url && isWebUrl(url) ? permissionStates(e.sender, url) : null
+  })
+  ipcMain.handle(IPC.pageDevices, (e) => {
+    const url = e.senderFrame?.url
+    return url && isWebUrl(url) ? devicesFor(e.sender, url) : null
+  })
   ipcMain.on(IPC.pageRepainted, (e, first) => {
     const tab = controllerFor(e.sender)?.tabFor(e.sender)
     if (tab && e.senderFrame === e.sender.mainFrame) tab.pageRepainted(first === true)
-  })
-  ipcMain.on(IPC.pageShare, (e) => {
-    const c = controllerFor(e.sender)
-    const tab = c?.tabFor(e.sender)
-    if (c && tab) void c.openSendPickerForTab(tab)
   })
   handleChrome(IPC.signInWithGoogle, async (c) => {
     try {
@@ -306,6 +364,11 @@ export function registerIpc(): void {
   })
   onChrome(IPC.setBadge, (_c, count) => isNumber(count) && app.setBadgeCount(Math.max(0, Math.floor(count))))
 
+  // Not private, and every page of the browser's own needs it before it draws anything.
+  ipcMain.on(IPC.themeGet, (e) => {
+    e.returnValue = store.settings.theme
+  })
+
   // First-run intro and importing from other browsers
   ipcMain.on(IPC.introPending, (e) => {
     // BROWSERR_INTRO=1 shows it on every launch of a development build, for working on it.
@@ -318,9 +381,11 @@ export function registerIpc(): void {
   })
   handleChrome(IPC.importSources, () => findImportSources())
   handleChrome(IPC.importPreview, (_c, id) => previewImport(id))
-  handleChrome(IPC.importRun, (_c, id, choice) => {
-    const c = choice as ImportChoice | null
-    return runImport(id, { favorites: c?.favorites === true, history: c?.history === true })
+  handleChrome(IPC.importRun, (c, id, choice) => {
+    const what = choice as ImportChoice | null
+    return runImport(id, { favorites: what?.favorites === true, history: what?.history === true, tabs: what?.tabs === true }, (tabs) =>
+      c.importTabs(tabs)
+    )
   })
   onChrome(IPC.importOpenAccess, () => openFullDiskAccessSettings())
 
@@ -339,6 +404,14 @@ export function registerIpc(): void {
 
   onChrome(IPC.overlayPick, (c, index) => isNumber(index) && c.pickSuggestion(index))
   onChrome(IPC.overlayClose, (c) => c.closeOverlay())
+  onChrome(IPC.overlayPermissionAnswer, (_c, raw) => {
+    const answer = permissionAnswer(raw)
+    if (!answer) return
+    // The devices you picked while answering are the ones sites use from now on.
+    if ('devices' in answer && answer.devices && (answer.decision === 'once' || answer.decision === 'always')) updateSettings({ devices: answer.devices })
+    answerPrompt(answer)
+  })
+  onChrome(IPC.overlayPromptHeight, (c, height) => isNumber(height) && c.setPromptHeight(height))
   onChrome(IPC.overlayPeekHover, (c, inside) => c.peekHover('panel', inside === true))
   onChrome(IPC.overlayOpenPanel, (c, panel) => {
     c.closeOverlay()
@@ -410,4 +483,15 @@ export function registerIpc(): void {
   })
   handleInternalInWindow(IPC.internalOpenWebStore, (c) => void c.createTab(WEB_STORE_URL))
   handleInternalInWindow(IPC.internalOpenImport, (c) => c.sendCommand({ type: 'show-import' }))
+  handleInternal(IPC.internalSiteAccess, () => store.siteAccess())
+  handleInternal(IPC.internalSetSitePermission, (origin, permission, decision) => {
+    if (isString(origin) && ORIGIN_RE.test(origin) && isSitePermission(permission) && (decision === 'allow' || decision === 'deny' || decision === null)) {
+      store.setPermission(origin, permission, decision as PermissionDecision | null)
+    }
+    return store.siteAccess()
+  })
+  handleInternal(IPC.internalForgetSite, (origin) => {
+    if (isString(origin) && ORIGIN_RE.test(origin)) store.clearSitePermissions(origin)
+    return store.siteAccess()
+  })
 }

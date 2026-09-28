@@ -1,5 +1,4 @@
 import type { SearchEngine } from './types'
-import { parseYouTube } from './youtube'
 
 export const INTERNAL_SCHEME = 'browserr'
 export const NEW_TAB_URL = `${INTERNAL_SCHEME}://newtab/`
@@ -74,17 +73,4 @@ export const URL_RE = /(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])/g
 
 export function findLinks(text: string): string[] {
   return text.match(URL_RE) ?? []
-}
-
-/** Two URLs with the same key are the same page: ignores www, #fragments, trailing slashes and YouTube start times. */
-export function pageKey(url: string): string {
-  const yt = parseYouTube(url)
-  if (yt) return `yt:${yt.id}`
-  try {
-    const u = new URL(url)
-    const path = u.pathname.replace(/\/+$/, '')
-    return `${u.hostname.replace(/^www\./, '').toLowerCase()}${path}${u.search}`
-  } catch {
-    return url
-  }
 }

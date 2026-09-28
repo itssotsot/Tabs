@@ -3,22 +3,35 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type InternalAPI } from '@shared/api'
 import { INTERNAL_SCHEME } from '@shared/url'
-import { installCosmeticFiltering } from './cosmetics'
+import { installAdBlocking } from './adblock'
+import { installCallControls } from './call-controls'
+import { installCapture } from './capture'
 import { installSharedLinkGuard } from './links'
 import { installBackgroundMediaHold } from './media'
 import { installMediaControls } from './media-controls'
 import { installPageColorHints } from './page-color'
-import { installYouTubeAdBlocking } from './youtube'
+import { installPermissionStates } from './permission-states'
+import { pageSite } from './sites'
+import { followTheme } from './theme'
 
 // Preloads also run in iframes (so extensions' user scripts can reach them); these are for the page itself.
 const isTopFrame = window.top === window
 
 if (isTopFrame) installPageColorHints()
 
+// In iframes too: calls are often embedded in other pages.
+if (/^https?:$/.test(location.protocol)) {
+  installCapture()
+  installPermissionStates()
+}
+
 if (/^https?:$/.test(location.protocol) && isTopFrame) {
+  const site = pageSite(location.hostname)
+  // Before the background hold, which puts back whatever play() it found when it lets go.
+  installMediaControls(site)
   installBackgroundMediaHold()
-  installMediaControls()
-  installCosmeticFiltering()
+  installAdBlocking(site)
+  installCallControls(site)
   installSharedLinkGuard()
 }
 
@@ -42,76 +55,11 @@ if (location.protocol === `${INTERNAL_SCHEME}:` && isTopFrame) {
     openExtensionOptions: (id) => ipcRenderer.invoke(IPC.internalExtensionOptions, id),
     openWebStore: () => ipcRenderer.invoke(IPC.internalOpenWebStore),
     setExtensionPinned: (id, pinned) => ipcRenderer.invoke(IPC.internalExtensionSetPinned, id, pinned),
-    openImport: () => ipcRenderer.invoke(IPC.internalOpenImport)
+    openImport: () => ipcRenderer.invoke(IPC.internalOpenImport),
+    siteAccess: () => ipcRenderer.invoke(IPC.internalSiteAccess),
+    setSitePermission: (origin, permission, decision) => ipcRenderer.invoke(IPC.internalSetSitePermission, origin, permission, decision),
+    forgetSite: (origin) => ipcRenderer.invoke(IPC.internalForgetSite, origin)
   }
   contextBridge.exposeInMainWorld('browserrInternal', api)
-}
-
-if (/(^|\.)youtube\.com$/.test(location.hostname) && isTopFrame) {
-  // Synchronous on purpose: this has to be in place before YouTube's own scripts run.
-  if (ipcRenderer.sendSync(IPC.pageAdblockEnabled) === true) installYouTubeAdBlocking()
-
-  const BUTTON_ID = 'browserr-send-button'
-  const SVG_NS = 'http://www.w3.org/2000/svg'
-
-  // Built with DOM APIs because YouTube enforces Trusted Types (no innerHTML).
-  const makeButton = (): HTMLButtonElement => {
-    const button = document.createElement('button')
-    button.id = BUTTON_ID
-    button.className = 'ytp-button'
-    button.title = 'Send to a friend (⌘⇧S)'
-    button.setAttribute('aria-label', 'Send to a friend')
-    Object.assign(button.style, {
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      verticalAlign: 'top'
-    })
-
-    const svg = document.createElementNS(SVG_NS, 'svg')
-    svg.setAttribute('viewBox', '0 0 24 24')
-    svg.setAttribute('width', '60%')
-    svg.setAttribute('height', '60%')
-    svg.setAttribute('fill', 'none')
-    svg.setAttribute('stroke', 'white')
-    svg.setAttribute('stroke-width', '2')
-    svg.setAttribute('stroke-linecap', 'round')
-    svg.setAttribute('stroke-linejoin', 'round')
-    for (const d of ['M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z', 'm21.854 2.147-10.94 10.939']) {
-      const path = document.createElementNS(SVG_NS, 'path')
-      path.setAttribute('d', d)
-      svg.appendChild(path)
-    }
-    button.appendChild(svg)
-
-    button.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      ipcRenderer.send(IPC.pageShare)
-    })
-    return button
-  }
-
-  const inject = (): void => {
-    if (document.getElementById(BUTTON_ID)) return
-    const controls = document.querySelector('#movie_player .ytp-right-controls')
-    if (controls) controls.prepend(makeButton())
-  }
-
-  const start = (): void => {
-    inject()
-    // YouTube is a single-page app that rebuilds the player, so keep re-checking (at most once per frame).
-    let scheduled = false
-    new MutationObserver(() => {
-      if (scheduled) return
-      scheduled = true
-      requestAnimationFrame(() => {
-        scheduled = false
-        inject()
-      })
-    }).observe(document.documentElement, { childList: true, subtree: true })
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start)
-  else start()
+  followTheme()
 }

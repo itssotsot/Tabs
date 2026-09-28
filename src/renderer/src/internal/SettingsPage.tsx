@@ -1,8 +1,9 @@
 import { X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
-import { TAB_LAYOUTS } from '@shared/constants'
-import type { AppInfo, SearchEngine, Settings, TabLayout } from '@shared/types'
+import { TAB_LAYOUTS, THEMES } from '@shared/constants'
+import type { AppInfo, SearchEngine, Settings, TabLayout, ThemeId } from '@shared/types'
 import { INTERNAL_SCHEME, SEARCH_ENGINE_NAMES } from '@shared/url'
+import { SiteAccess } from './SiteAccess'
 
 function Toggle({ label, detail, checked, onChange }: { label: string; detail?: string; checked: boolean; onChange: (v: boolean) => void }): ReactNode {
   return (
@@ -48,6 +49,19 @@ export function SettingsPage(): ReactNode {
             {Object.entries(SEARCH_ENGINE_NAMES).map(([id, name]) => (
               <option key={id} value={id}>
                 {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="setting">
+          <span className="setting-text">
+            <strong>Theme</strong>
+            <span>{THEMES.find((t) => t.id === settings.theme)?.description}. You can also switch from View › Theme.</span>
+          </span>
+          <select value={settings.theme} onChange={(e) => void update({ theme: e.target.value as ThemeId })}>
+            {THEMES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
               </option>
             ))}
           </select>
@@ -111,7 +125,7 @@ export function SettingsPage(): ReactNode {
         />
         <Toggle
           label="Memory Saver"
-          detail="Pause tabs you haven't used for 5 minutes and unload them after 30. They come back when you open them. Pinned tabs, tabs playing audio and sites that send you notifications stay awake."
+          detail="Pause tabs you haven't used for 5 minutes and unload them after 30. They come back when you open them. Pinned tabs, tabs playing audio or using your camera or microphone, and sites that send you notifications stay awake."
           checked={settings.memorySaver}
           onChange={(v) => void update({ memorySaver: v })}
         />
@@ -137,7 +151,7 @@ export function SettingsPage(): ReactNode {
         <div className="setting">
           <span className="setting-text">
             <strong>Import from another browser</strong>
-            <span>Bring over the bookmarks bar (as favorites) and history from Chrome, Safari, Firefox, Arc and others.</span>
+            <span>Bring over open tabs, the bookmarks bar (as favorites) and history from Chrome, Safari, Firefox, Arc and others.</span>
           </span>
           <button className="secondary-btn" onClick={() => void api.openImport()}>
             Import…
@@ -183,6 +197,8 @@ export function SettingsPage(): ReactNode {
           </button>
         </div>
       </section>
+
+      <SiteAccess settings={settings} update={update} />
 
       <section className="card">
         <h2>Sharing</h2>

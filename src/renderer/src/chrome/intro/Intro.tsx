@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Check, Copy, Globe, History, Lock, Search, Send, Star, UserPlus, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Copy, Globe, History, Layers, Lock, Search, Send, Star, UserPlus, X } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { ImportCounts, ImportPreview, ImportSource } from '@shared/types'
 import { acceptFriend, addFriend, type FriendRequestResult } from '../../social/api'
@@ -326,10 +326,13 @@ const plural = (n: number, one: string, many: string): string => `${n.toLocaleSt
 
 function importSummary(counts: ImportCounts): string {
   const parts = [
+    counts.tabs > 0 && plural(counts.tabs, 'tab', 'tabs'),
     counts.favorites > 0 && plural(counts.favorites, 'favorite', 'favorites'),
     counts.history > 0 && plural(counts.history, 'page', 'pages') + ' of history'
-  ].filter(Boolean)
-  return parts.length ? `Added ${parts.join(' and ')}.` : 'Everything there was already here.'
+  ].filter((p): p is string => !!p)
+  if (!parts.length) return 'Everything there was already here.'
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+  return `Added ${list}.`
 }
 
 function ImportStep({ mode, onNext, onBack }: StepProps & { mode: IntroMode; onBack?: () => void }): ReactNode {
@@ -338,7 +341,7 @@ function ImportStep({ mode, onNext, onBack }: StepProps & { mode: IntroMode; onB
   const [selected, setSelected] = useState<string | null>(null)
   // undefined while reading; null when the browser's data can't be read yet (Safari without Full Disk Access).
   const [preview, setPreview] = useState<ImportPreview | null | undefined>(undefined)
-  const [choice, setChoice] = useState({ favorites: true, history: true })
+  const [choice, setChoice] = useState({ tabs: true, favorites: true, history: true })
   const [running, setRunning] = useState(false)
   const [imported, setImported] = useState<Record<string, ImportCounts>>({})
   const [error, setError] = useState('')
@@ -368,17 +371,15 @@ function ImportStep({ mode, onNext, onBack }: StepProps & { mode: IntroMode; onB
   const source = sources?.find((s) => s.id === selected)
   const done = selected ? imported[selected] : undefined
   const anyImported = Object.keys(imported).length > 0
-  const canImport = !!preview && !done && ((choice.favorites && preview.favorites > 0) || (choice.history && preview.history > 0))
+  const chosen = (key: keyof typeof choice): boolean => !!preview && choice[key] && preview[key] > 0
+  const canImport = !done && (chosen('tabs') || chosen('favorites') || chosen('history'))
 
   const run = async (): Promise<void> => {
     if (!selected || !preview) return
     setRunning(true)
     setError('')
     try {
-      const counts = await api.importer.run(selected, {
-        favorites: choice.favorites && preview.favorites > 0,
-        history: choice.history && preview.history > 0
-      })
+      const counts = await api.importer.run(selected, { tabs: chosen('tabs'), favorites: chosen('favorites'), history: chosen('history') })
       setImported((prev) => ({ ...prev, [selected]: counts }))
     } catch {
       setError("Couldn't import. Quit the other browser and try again.")
@@ -435,6 +436,17 @@ function ImportStep({ mode, onNext, onBack }: StepProps & { mode: IntroMode; onB
   } else if (source && preview) {
     const rows = [
       {
+        key: 'tabs' as const,
+        icon: <Layers size={16} />,
+        label: 'Open tabs',
+        detail: !preview.tabs
+          ? 'No open tabs'
+          : preview.tabsFound > preview.tabs
+            ? `The first ${preview.tabs} of ${preview.tabsFound.toLocaleString()}`
+            : plural(preview.tabs, 'tab', 'tabs'),
+        count: preview.tabs
+      },
+      {
         key: 'favorites' as const,
         icon: <Star size={16} />,
         label: 'Favorites',
@@ -484,9 +496,10 @@ function ImportStep({ mode, onNext, onBack }: StepProps & { mode: IntroMode; onB
 
   return (
     <>
-      <h1>Bring your bookmarks and history</h1>
+      <h1>Bring everything with you</h1>
       <p className="intro-lede">
-        The bookmarks bar becomes your favorites, and your history lets the address bar finish what you type.
+        Your open tabs come along, the bookmarks bar becomes your favorites, and your history lets the address bar
+        finish what you type.
       </p>
 
       {sources === null ? (

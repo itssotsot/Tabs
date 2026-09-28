@@ -8,7 +8,7 @@ import { Avatar } from '../../ui/Avatar'
 import { copyText, MENU_SEPARATOR, popupMenu } from '../../ui/menu'
 import { cx, shortcut, siteIcon, timeAgo } from '../../ui/util'
 import { useLinks, type SharedLink } from './links'
-import { hasMediaBar, MediaButton, MediaProgress, MuteButton } from './media'
+import { CallButtons, CaptureSigns, hasMediaBar, MediaButton, MediaProgress, MuteButton } from './media'
 
 export function TabIcon({ tab }: { tab: TabState }): ReactNode {
   const [broken, setBroken] = useState<string | null>(null)
@@ -252,11 +252,16 @@ export function TabItem({ tab, index, active, dragging, onDragStart, onDrop, sho
       {link ? <LinkIcon url={tab.url} link={link} favicon={<TabIcon tab={tab} />} /> : <TabIcon tab={tab} />}
       {!tab.pinned && <MarqueeText className="tab-title" text={tab.title} />}
       {!tab.pinned && <span className="tab-age">{tabAge(since, now)}</span>}
-      {/* A pinned tab is just its icon, plus mute while it plays. */}
+      {/* A pinned tab is just its icon, plus the mic in a call and mute while it plays. */}
       {tab.pinned ? (
-        <MuteButton tab={tab} />
+        <>
+          <CallButtons tab={tab} micOnly />
+          <MuteButton tab={tab} />
+        </>
       ) : (
         <span className="tab-actions">
+          <CaptureSigns tab={tab} />
+          <CallButtons tab={tab} />
           <MuteButton tab={tab} animated />
           <MediaButton tab={tab} />
           <button
@@ -390,23 +395,17 @@ export function NewTabButton(): ReactNode {
   )
 }
 
+/** There are two layouts, so the button flips to the other one. */
 export function LayoutButton({ layout }: { layout: TabLayout }): ReactNode {
-  const name = TAB_LAYOUTS.find((l) => l.id === layout)?.name ?? 'Tab layout'
+  const next = TAB_LAYOUTS.find((l) => l.id !== layout) ?? TAB_LAYOUTS[0]
   return (
-    <button
-      className="icon-btn small layout-btn"
-      title={`Tab layout: ${name}`}
-      onClick={(e) => {
-        const r = e.currentTarget.getBoundingClientRect()
-        window.browserr.tabLayoutMenu(r.left, r.bottom + 4)
-      }}
-    >
+    <button className="icon-btn small layout-btn" title={`Switch to ${next.name.toLowerCase()}`} onClick={() => void window.browserr.settings.set({ tabLayout: next.id })}>
       <PanelsTopLeft size={15} />
     </button>
   )
 }
 
-/** The draggable top row: room for the window controls, the tabs, and the layout picker. */
+/** The draggable top row: room for the window controls, the tabs, and the layout button. */
 export function StripFrame({ state, layout, children }: { state: WindowState; layout: TabLayout; children: ReactNode }): ReactNode {
   const { platform } = window.browserr
   const leftPad = platform === 'darwin' && !state.fullscreen ? 80 : 8

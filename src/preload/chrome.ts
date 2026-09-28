@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type BrowserrAPI, type Unsubscribe } from '@shared/api'
+import { followTheme } from './theme'
 
 function on<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
   const listener = (_e: IpcRendererEvent, payload: T): void => cb(payload)
@@ -20,7 +21,9 @@ const api: BrowserrAPI = {
     groupMenu: (group) => ipcRenderer.send(IPC.tabGroupMenu, group),
     contextMenu: (id) => ipcRenderer.send(IPC.tabContextMenu, id),
     toggleMute: (id) => ipcRenderer.send(IPC.tabToggleMute, id),
-    media: (id, command) => ipcRenderer.send(IPC.tabMedia, id, command)
+    media: (id, command) => ipcRenderer.send(IPC.tabMedia, id, command),
+    call: (id, device) => ipcRenderer.send(IPC.tabCall, id, device),
+    stopCapture: (id, device) => ipcRenderer.send(IPC.tabStopCapture, id, device)
   },
   nav: {
     go: (input) => ipcRenderer.send(IPC.navigate, input),
@@ -36,8 +39,8 @@ const api: BrowserrAPI = {
   onCommand: (cb) => on(IPC.command, cb),
   setInsets: (insets) => ipcRenderer.send(IPC.setInsets, insets),
   siteInfoMenu: () => ipcRenderer.send(IPC.siteInfoMenu),
+  captureMenu: () => ipcRenderer.send(IPC.captureMenu),
   appMenu: (x, y) => ipcRenderer.send(IPC.appMenu, x, y),
-  tabLayoutMenu: (x, y) => ipcRenderer.send(IPC.tabLayoutMenu, x, y),
   showMenu: (items) => ipcRenderer.invoke(IPC.showMenu, items),
   omnibox: {
     query: (text) => ipcRenderer.invoke(IPC.omniboxQuery, text),
@@ -109,8 +112,11 @@ const api: BrowserrAPI = {
     pick: (index) => ipcRenderer.send(IPC.overlayPick, index),
     close: () => ipcRenderer.send(IPC.overlayClose),
     openPanel: (panel) => ipcRenderer.send(IPC.overlayOpenPanel, panel),
-    peekHover: (inside) => ipcRenderer.send(IPC.overlayPeekHover, inside)
+    peekHover: (inside) => ipcRenderer.send(IPC.overlayPeekHover, inside),
+    answerPermission: (answer) => ipcRenderer.send(IPC.overlayPermissionAnswer, answer),
+    promptHeight: (height) => ipcRenderer.send(IPC.overlayPromptHeight, height)
   }
 }
 
 contextBridge.exposeInMainWorld('browserr', api)
+followTheme()

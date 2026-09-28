@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { TAB_LAYOUTS } from '@shared/constants'
-import type { Bookmark, HistoryEntry, Settings, TabLink } from '@shared/types'
+import { TAB_LAYOUTS, THEMES } from '@shared/constants'
+import type { Bookmark, HistoryEntry, PermissionDecision, Settings, SiteAccess, SitePermission, TabLink } from '@shared/types'
 
 /** History and bookmark changes, for code that follows along (the Chrome extension APIs). */
 interface StoreEventMap {
@@ -80,10 +80,9 @@ export interface SavedWindow {
   activeIndex: number
 }
 
-type PermissionDecision = 'allow' | 'deny'
-
 export const DEFAULT_SETTINGS: Settings = {
   searchEngine: 'google',
+  theme: 'default',
   adblock: true,
   notifications: true,
   restoreSession: true,
@@ -92,7 +91,9 @@ export const DEFAULT_SETTINGS: Settings = {
   groupTabsBySite: true,
   ungroupedSites: [],
   showTabAge: false,
-  showGroupLines: false
+  showGroupLines: false,
+  blockedPermissions: [],
+  devices: { camera: null, microphone: null, speaker: null }
 }
 
 /** Site names learned from pages; the oldest go first past this. */
@@ -103,7 +104,7 @@ class Stores {
   private bookmarksFile!: JsonFile<{ items: Bookmark[] }>
   private settingsFile!: JsonFile<Settings>
   private sessionFile!: JsonFile<{ windows: SavedWindow[] }>
-  private permissionsFile!: JsonFile<{ sites: Record<string, Record<string, PermissionDecision>> }>
+  private permissionsFile!: JsonFile<{ sites: Record<string, Partial<Record<SitePermission, PermissionDecision>>> }>
   private predictorFile!: JsonFile<{ hosts: PredictorData }>
   private sitesFile!: JsonFile<{ names: Record<string, string>; colors: Record<string, string> }>
   private extensionsFile!: JsonFile<{ disabled: string[] }>
@@ -116,8 +117,10 @@ class Stores {
     this.settingsFile = new JsonFile('settings', DEFAULT_SETTINGS)
     // Settings saved with a layout that's since been removed.
     if (!TAB_LAYOUTS.some((l) => l.id === this.settingsFile.data.tabLayout)) this.settingsFile.data.tabLayout = DEFAULT_SETTINGS.tabLayout
+    if (!THEMES.some((t) => t.id === this.settingsFile.data.theme)) this.settingsFile.data.theme = DEFAULT_SETTINGS.theme
     this.sessionFile = new JsonFile('session', { windows: [] })
     this.permissionsFile = new JsonFile('permissions', { sites: {} })
+    this.splitMediaPermissions()
     this.predictorFile = new JsonFile('predictor', { hosts: {} })
     this.sitesFile = new JsonFile('sites', { names: {}, colors: {} })
     this.extensionsFile = new JsonFile('extensions', { disabled: [] })
@@ -417,18 +420,45 @@ class Stores {
 
   // Site permissions
 
-  getPermission(origin: string, permission: string): PermissionDecision | undefined {
+  /** Early builds stored the camera and microphone as one choice, "media"; it stands for both. */
+  private splitMediaPermissions(): void {
+    const sites = this.permissionsFile.data.sites as Record<string, Record<string, PermissionDecision>>
+    let changed = false
+    for (const choices of Object.values(sites)) {
+      const media = choices.media
+      if (!media) continue
+      choices.camera ??= media
+      choices.microphone ??= media
+      delete choices.media
+      changed = true
+    }
+    if (changed) this.permissionsFile.save()
+  }
+
+  getPermission(origin: string, permission: SitePermission): PermissionDecision | undefined {
     return this.permissionsFile.data.sites[origin]?.[permission]
   }
 
-  setPermission(origin: string, permission: string, decision: PermissionDecision): void {
+  /** Null forgets the site's choice, so it's asked again. */
+  setPermission(origin: string, permission: SitePermission, decision: PermissionDecision | null): void {
     const sites = this.permissionsFile.data.sites
-    sites[origin] = { ...sites[origin], [permission]: decision }
+    const choices = { ...sites[origin] }
+    if (decision) choices[permission] = decision
+    else delete choices[permission]
+    if (Object.keys(choices).length) sites[origin] = choices
+    else delete sites[origin]
     this.permissionsFile.save()
   }
 
-  sitePermissions(origin: string): Record<string, PermissionDecision> {
+  sitePermissions(origin: string): Partial<Record<SitePermission, PermissionDecision>> {
     return this.permissionsFile.data.sites[origin] ?? {}
+  }
+
+  /** Every site with a saved choice, by address. */
+  siteAccess(): SiteAccess[] {
+    return Object.entries(this.permissionsFile.data.sites)
+      .map(([origin, permissions]) => ({ origin, permissions }))
+      .sort((a, b) => a.origin.replace(/^https?:\/\//, '').localeCompare(b.origin.replace(/^https?:\/\//, '')))
   }
 
   clearSitePermissions(origin?: string): void {

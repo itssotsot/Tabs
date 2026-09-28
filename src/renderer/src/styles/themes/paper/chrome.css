@@ -1,0 +1,782 @@
+/*
+ * Paper in the browser UI and the overlay: everything drawn by hand. Its colors are in tokens.css.
+ *
+ * How things look drawn:
+ * - Corners are uneven (the --wobble radii), so boxes look drawn freehand rather than ruled.
+ * - Outlines that matter (the address bar, the tab you're on, popups) are a pseudo-element's border run through
+ *   the #paper-pencil filter (ui/paper.ts), which roughens the line. The text inside stays crisp.
+ * - Icons go through the finer #paper-wobble filter.
+ * - Long edges (the sidebar's, the toolbar's) are wavy pencil lines: masks colored with --ink.
+ * - Shadows are hard and offset (--shadow, --shadow-sm), like a sheet laid on another.
+ */
+
+[data-theme='paper'] body:not(.overlay-body) {
+  background: var(--grain), var(--bg);
+}
+
+[data-theme='paper'] button:focus-visible {
+  outline: 1.5px dashed var(--accent);
+  outline-offset: 2px;
+}
+
+[data-theme='paper'] ::selection {
+  background: var(--highlight);
+  color: inherit;
+}
+
+[data-theme='paper'] svg.lucide {
+  stroke-width: 1.8;
+  filter: url(#paper-wobble);
+}
+
+[data-theme='paper'] kbd {
+  font-family: inherit;
+  font-size: 12px;
+  border-radius: var(--wobble);
+  border-color: var(--ink);
+  background: var(--bg-input);
+  box-shadow: 1px 1px 0 var(--drop);
+}
+
+/* A rough pencil outline, drawn on a pseudo-element so only the line is roughened, not what's inside. */
+[data-theme='paper'] :is(.omnibox, .suggestions, .group-peek, .picker, .overview-search)::before,
+[data-theme='paper'] .tab.active::before,
+[data-theme='paper'] .vtab-list .tab.active::before,
+[data-theme='paper'] .vlink.active::after,
+[data-theme='paper'] .segment.active::before {
+  content: '';
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble);
+  filter: url(#paper-pencil);
+  pointer-events: none;
+}
+
+/* ---------- buttons ---------- */
+
+[data-theme='paper'] .icon-btn {
+  border-radius: var(--wobble-round);
+}
+
+[data-theme='paper'] .primary-btn {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble);
+  background: var(--accent);
+  box-shadow: 2px 2px 0 var(--ink);
+  font-weight: 400;
+  font-size: 1.08em;
+  transition:
+    translate 0.1s,
+    box-shadow 0.1s;
+}
+
+[data-theme='paper'] .primary-btn:hover:not(:disabled) {
+  filter: none;
+  translate: -1px -1px;
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+[data-theme='paper'] .primary-btn:active:not(:disabled) {
+  translate: 1px 1px;
+  box-shadow: 0 0 0 var(--ink);
+}
+
+[data-theme='paper'] .secondary-btn {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble-2);
+  background: var(--bg-input);
+  color: var(--text);
+  box-shadow: 2px 2px 0 var(--drop);
+}
+
+[data-theme='paper'] .ghost-btn,
+[data-theme='paper'] .invite-chip,
+[data-theme='paper'] .my-username,
+[data-theme='paper'] .join-code {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--wobble);
+  background: none;
+}
+
+[data-theme='paper'] .ghost-btn:hover,
+[data-theme='paper'] .ghost-btn.on,
+[data-theme='paper'] .invite-chip:hover:not(:disabled) {
+  border-style: solid;
+  border-color: var(--ink);
+  background: var(--bg-input);
+}
+
+[data-theme='paper'] .link-btn:hover,
+[data-theme='paper'] .leave-btn:hover {
+  text-decoration: underline wavy;
+  text-underline-offset: 3px;
+}
+
+/* Counts are circled in red pencil. */
+[data-theme='paper'] :is(.badge, .count, .segment .count, .group-chip .count) {
+  border-radius: var(--wobble-round);
+  background: var(--accent-2);
+  font-weight: 400;
+}
+
+[data-theme='paper'] .badge {
+  box-shadow: 0 0 0 2px var(--bg-raised);
+}
+
+[data-theme='paper'] :is(.unread-dot, .vlink.fresh::before, .ov-card.fresh::before) {
+  border-radius: var(--wobble-round);
+  background: var(--accent-2);
+}
+
+[data-theme='paper'] .spinner {
+  border-color: var(--border);
+  border-top-color: var(--ink);
+  border-radius: var(--wobble-round);
+}
+
+/* A strip of washi tape. */
+[data-theme='paper'] .profile-chip {
+  padding: 3px 12px;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--accent-2) 42%, transparent);
+  color: var(--text);
+  font-weight: 400;
+  font-size: 13px;
+  rotate: -2deg;
+  mask:
+    conic-gradient(from 45deg at left, #000 90deg, #0000 0) left / 51% 5px repeat-y,
+    conic-gradient(from 225deg at right, #000 90deg, #0000 0) right / 51% 5px repeat-y;
+}
+
+/* ---------- tabs ---------- */
+
+[data-theme='paper'] .tab {
+  border-radius: var(--wobble);
+}
+
+[data-theme='paper'] .tab:hover {
+  background: var(--bg-hover);
+}
+
+[data-theme='paper'] .tab.active,
+[data-theme='paper'] .vtab-list .tab.active,
+[data-theme='paper'] .chrome .tabstrip .tab.active {
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] .chrome .tabstrip .tab {
+  border-radius: var(--wobble-2);
+}
+
+[data-theme='paper'] :is(.tab-close, .tab-audio, .tab-media, .star-btn) {
+  border-radius: var(--wobble-round);
+}
+
+[data-theme='paper'] .tab-age,
+[data-theme='paper'] .vlink-time {
+  font-size: 12px;
+}
+
+[data-theme='paper'] .media-time {
+  border: 1px solid var(--ink);
+  border-radius: var(--wobble);
+  background: var(--bg-input);
+  box-shadow: 1px 1px 0 var(--drop);
+}
+
+[data-theme='paper'] .group-chip {
+  border: 1.5px solid var(--group-mark);
+  border-radius: var(--wobble-2);
+  background: color-mix(in srgb, var(--group-mark) 12%, transparent);
+  color: color-mix(in srgb, var(--group-mark) 65%, var(--ink));
+  font-weight: 400;
+  font-size: 14px;
+}
+
+[data-theme='paper'] .group-chip:hover {
+  background: color-mix(in srgb, var(--group-mark) 22%, transparent);
+}
+
+[data-theme='paper'] .tab-group.open .group-chip {
+  border-color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] .tab-group.open .group-chip .favicon {
+  border-radius: var(--wobble-round);
+}
+
+[data-theme='paper'] .group-peek-head {
+  color: color-mix(in srgb, var(--group-mark) 65%, var(--ink));
+}
+
+[data-theme='paper'] .tab.grouped::after,
+[data-theme='paper'] .drop-line {
+  border-radius: var(--wobble);
+}
+
+[data-theme='paper'] .more-chip {
+  border: 1.5px solid var(--border);
+  border-radius: var(--wobble);
+  background: none;
+}
+
+/* ---------- toolbar ---------- */
+
+[data-theme='paper'] .chrome .chrome-header {
+  position: relative;
+}
+
+/* The toolbar's bottom edge, where the page starts. */
+[data-theme='paper'] .chrome .chrome-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 4px;
+  background: var(--ink);
+  opacity: 0.55;
+  mask: var(--pencil-line-h) repeat-x;
+  pointer-events: none;
+}
+
+[data-theme='paper'] .chrome .toolbar,
+[data-theme='paper'] .chrome .findbar {
+  background: var(--grain), var(--bg-raised);
+}
+
+[data-theme='paper'] .chrome .toolbar .icon-btn {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble-round);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+  filter: url(#paper-pencil);
+}
+
+[data-theme='paper'] .chrome .toolbar .icon-btn svg.lucide {
+  filter: none;
+}
+
+[data-theme='paper'] .chrome .toolbar .icon-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-input), var(--highlight));
+}
+
+[data-theme='paper'] .chrome .toolbar .icon-btn:active:not(:disabled),
+[data-theme='paper'] .chrome .toolbar .icon-btn.pressed {
+  background: var(--highlight);
+  box-shadow: none;
+  translate: 1px 1px;
+}
+
+/* Back and forward, with nowhere to go, are only sketched in. */
+[data-theme='paper'] .chrome .toolbar .icon-btn:disabled {
+  border-style: dashed;
+  box-shadow: none;
+  background: none;
+}
+
+/* A photo isn't redrawn by hand. */
+[data-theme='paper'] .chrome .toolbar .icon-btn.avatar-btn {
+  filter: none;
+  border-radius: 50%;
+}
+
+[data-theme='paper'] .omnibox,
+[data-theme='paper'] .chrome .omnibox {
+  position: relative;
+  border: 0;
+  border-radius: var(--wobble);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] .omnibox:hover,
+[data-theme='paper'] .chrome .omnibox:hover {
+  background: var(--bg-input);
+}
+
+[data-theme='paper'] .omnibox:focus-within::before {
+  border-color: var(--accent);
+}
+
+[data-theme='paper'] .omnibox input {
+  font-size: 15px;
+}
+
+[data-theme='paper'] :is(.omnibox-icon, .omnibox-reload, .omnibox-star, .omnibox-send) {
+  border-radius: var(--wobble-round);
+}
+
+[data-theme='paper'] .omnibox-chip {
+  border-radius: var(--wobble);
+  background: var(--highlight);
+  color: var(--text);
+}
+
+/* While the send picker is out, the bar keeps its paper and its outline. */
+[data-theme='paper'] .toolbar .omnibox.expanded,
+[data-theme='paper'] .toolbar .omnibox.expanded:hover {
+  background: var(--bg-input);
+  box-shadow: var(--bar-open-shadow);
+}
+
+/* The send picker's copy of the toolbar stays invisible (see .picker-layer); only the tray in it is drawn. */
+[data-theme='paper'] .picker-layer :is(.toolbar, .omnibox),
+[data-theme='paper'] .picker-layer :is(.toolbar, .omnibox):hover {
+  background: none;
+  box-shadow: none;
+}
+
+[data-theme='paper'] .picker-layer .omnibox::before {
+  display: none;
+}
+
+[data-theme='paper'] .picker-bar-shadow {
+  border-radius: var(--wobble);
+}
+
+[data-theme='paper'] .update-btn,
+[data-theme='paper'] .chrome .update-btn {
+  border: 1.5px solid var(--accent);
+  border-radius: var(--wobble);
+  background: var(--highlight);
+  color: var(--text);
+  font-weight: 400;
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] .download-ring circle {
+  stroke: var(--ink);
+}
+
+[data-theme='paper'] .findbar input,
+[data-theme='paper'] .input-prefix,
+[data-theme='paper'] .composer,
+[data-theme='paper'] .picker-note {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble-2);
+  background: var(--bg-input);
+}
+
+[data-theme='paper'] .findbar input:focus,
+[data-theme='paper'] .input-prefix:focus-within,
+[data-theme='paper'] .composer:focus-within,
+[data-theme='paper'] .picker-note:focus {
+  border-color: var(--accent);
+}
+
+/* ---------- vertical tabs ---------- */
+
+[data-theme='paper'] .vtabs {
+  border-right: 0;
+  background: var(--grain), var(--bg);
+}
+
+/* The column's edge, drawn in pencil. */
+[data-theme='paper'] .vtabs::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -1px;
+  bottom: 0;
+  width: 4px;
+  background: var(--ink);
+  opacity: 0.55;
+  mask: var(--pencil-line-v) repeat-y;
+  pointer-events: none;
+}
+
+[data-theme='paper'] .vtabs-resizer::after {
+  border-radius: var(--wobble);
+}
+
+[data-theme='paper'] .vtabs-section h4,
+[data-theme='paper'] :is(.rooms-panel, .room-details, .friends-panel) section h4,
+[data-theme='paper'] .overview-body h3 {
+  font-size: 15px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+[data-theme='paper'] .vtabs-heading {
+  text-decoration: underline wavy var(--border);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+}
+
+[data-theme='paper'] .vtabs-count {
+  color: var(--text-faint);
+}
+
+[data-theme='paper'] :is(.fav-tile, .fav-grid .tab.pinned) {
+  border: 1.5px solid var(--border);
+  border-radius: var(--wobble);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] :is(.fav-tile, .fav-grid .tab.pinned):nth-child(odd) {
+  border-radius: var(--wobble-2);
+}
+
+[data-theme='paper'] :is(.fav-tile:hover, .fav-grid .tab.pinned:hover) {
+  border-color: var(--ink);
+  background: var(--bg-input);
+}
+
+[data-theme='paper'] .fav-tile.is-open {
+  border-color: var(--text-muted);
+}
+
+[data-theme='paper'] :is(.fav-tile.active, .fav-grid .tab.pinned.active) {
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--bg-input), var(--highlight));
+}
+
+/* The pinned tab's outline is its border, like the other favorites. */
+[data-theme='paper'] .fav-grid .tab.pinned.active::before {
+  display: none;
+}
+
+[data-theme='paper'] :is(.vroom-toggle, .vlink, .vtabs-more, .vtabs-newtab) {
+  border-radius: var(--wobble);
+}
+
+[data-theme='paper'] .vroom-toggle {
+  font-weight: 400;
+  font-size: 15px;
+}
+
+[data-theme='paper'] .vlink.active {
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] .vlink.archived .vlink-title {
+  text-decoration-color: var(--text-faint);
+}
+
+[data-theme='paper'] .vtabs-more,
+[data-theme='paper'] .vtabs-newtab {
+  font-size: 14px;
+}
+
+[data-theme='paper'] .group-drag-image {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble);
+  background: var(--grain), var(--bg);
+}
+
+/* ---------- sidebar ---------- */
+
+[data-theme='paper'] .sidebar {
+  position: relative;
+  border-left: 0;
+  background: var(--grain), var(--bg-raised);
+}
+
+[data-theme='paper'] .sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -1px;
+  bottom: 0;
+  z-index: 1;
+  width: 4px;
+  background: var(--ink);
+  opacity: 0.55;
+  mask: var(--pencil-line-v) repeat-y;
+  pointer-events: none;
+}
+
+[data-theme='paper'] .segmented {
+  border-radius: var(--wobble);
+  background: var(--bg-hover);
+}
+
+[data-theme='paper'] .segment {
+  position: relative;
+  border-radius: var(--wobble);
+  font-weight: 400;
+  font-size: 14px;
+}
+
+[data-theme='paper'] .segment.active {
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] .onboarding-icon {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble);
+  background: var(--highlight);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  rotate: -3deg;
+}
+
+[data-theme='paper'] :is(.panel-empty h3, .onboarding h2) {
+  font-weight: 400;
+  font-size: 20px;
+}
+
+[data-theme='paper'] :is(.room-row, .friend-row, .download) {
+  border-radius: var(--wobble);
+}
+
+[data-theme='paper'] :is(.room-row-top strong, .account-name strong, .room-head-name strong) {
+  font-weight: 400;
+  font-size: 15px;
+}
+
+[data-theme='paper'] .avatar-stack > :last-child {
+  box-shadow: 0 0 0 2px var(--bg-raised);
+}
+
+[data-theme='paper'] .progress {
+  border: 1px solid var(--ink);
+  border-radius: var(--wobble);
+  background: none;
+  height: 6px;
+}
+
+[data-theme='paper'] .progress span {
+  background: repeating-linear-gradient(-45deg, var(--ink) 0 2px, transparent 2px 4px);
+}
+
+/* ---------- chats ---------- */
+
+[data-theme='paper'] .bubble {
+  border: 1.5px solid var(--border);
+  border-radius: var(--wobble);
+  background: var(--bg-input);
+}
+
+[data-theme='paper'] .message.mine .bubble {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+}
+
+[data-theme='paper'] .message-meta strong {
+  font-weight: 400;
+}
+
+[data-theme='paper'] .link-card {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble-2);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] .link-card:hover,
+[data-theme='paper'] .link-card:focus-visible {
+  box-shadow: 3px 4px 0 var(--accent-soft);
+  border-color: var(--accent);
+}
+
+[data-theme='paper'] .link-text strong {
+  font-weight: 400;
+  font-size: 15px;
+}
+
+[data-theme='paper'] :is(.message-tools, .reaction-picker) {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] :is(.reaction, .reaction-chip) {
+  border-radius: var(--wobble-round);
+}
+
+[data-theme='paper'] .reaction-chip {
+  box-shadow: none;
+  border: 1px solid var(--border);
+}
+
+[data-theme='paper'] :is(.reaction.on, .reaction-chip.on) {
+  background: var(--highlight);
+  box-shadow: none;
+  border-color: var(--ink);
+}
+
+[data-theme='paper'] .new-divider {
+  font-weight: 400;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+[data-theme='paper'] .composer-preview {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--wobble);
+}
+
+/* ---------- overlay: suggestions, a group's tabs, the send picker ---------- */
+
+[data-theme='paper'] :is(.suggestions, .group-peek, .picker) {
+  position: relative;
+  border-radius: var(--wobble);
+  background: var(--grain), var(--bg-popover);
+  box-shadow: var(--shadow);
+}
+
+/* The dropdown's window is exactly its width: the outline stays inside it, and the shadow falls straight down. */
+[data-theme='paper'] .suggestions {
+  box-shadow: 0 5px 0 var(--drop);
+}
+
+[data-theme='paper'] :is(.suggestions, .group-peek)::before {
+  inset: 1px 2px 1px 1px;
+}
+
+[data-theme='paper'] :is(.suggestion, .group-peek-tab, .picker-friend) {
+  position: relative;
+  z-index: 1;
+  border-radius: var(--wobble);
+}
+
+[data-theme='paper'] .group-peek-head,
+[data-theme='paper'] .group-peek-list,
+[data-theme='paper'] .picker-body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* The one you'd pick is marked with a highlighter. */
+[data-theme='paper'] :is(.suggestion.selected, .picker-friend.selected) {
+  background: var(--highlight);
+}
+
+[data-theme='paper'] .suggestion:hover:not(.selected),
+[data-theme='paper'] .group-peek-tab:hover {
+  background: var(--bg-hover);
+}
+
+[data-theme='paper'] .group-peek-tab.active {
+  background: color-mix(in srgb, var(--bg-input), var(--highlight));
+}
+
+[data-theme='paper'] .suggestion-title {
+  font-size: 15px;
+}
+
+[data-theme='paper'] .picker {
+  corner-shape: round;
+}
+
+/* The tray under the address bar hangs from it, so only its bottom is drawn freehand. */
+[data-theme='paper'] .picker.anchored {
+  background: var(--grain), var(--bg-input);
+  border-radius: 0 0 30px 18px / 0 0 22px 26px;
+  box-shadow: var(--shadow);
+}
+
+[data-theme='paper'] .picker.anchored::before {
+  border-top: 0;
+  border-radius: 0 0 30px 18px / 0 0 22px 26px;
+}
+
+[data-theme='paper'] .picker-search input {
+  font-size: 17px;
+}
+
+[data-theme='paper'] .picker-friend.done {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+[data-theme='paper'] :is(.picker-friend, .picker-note) {
+  corner-shape: round;
+}
+
+/* ---------- tab overview ---------- */
+
+[data-theme='paper'] .overview {
+  border-top: 0;
+  background: var(--grain), var(--bg-raised);
+}
+
+[data-theme='paper'] .overview-search {
+  position: relative;
+  border: 0;
+  border-radius: var(--wobble);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme='paper'] .overview-search input {
+  font-size: 17px;
+}
+
+[data-theme='paper'] .filter-chip {
+  border: 1.5px solid var(--border);
+  border-radius: var(--wobble);
+  background: none;
+  font-weight: 400;
+  font-size: 14px;
+}
+
+[data-theme='paper'] .filter-chip.on {
+  border-color: var(--ink);
+  background: var(--highlight);
+  box-shadow: none;
+}
+
+/* Cards pinned to the board, each a little askew. */
+[data-theme='paper'] .ov-card {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
+  transition:
+    rotate 0.15s,
+    translate 0.15s,
+    box-shadow 0.15s;
+}
+
+[data-theme='paper'] .ov-card:nth-child(3n + 1) {
+  rotate: -0.6deg;
+}
+
+[data-theme='paper'] .ov-card:nth-child(3n + 2) {
+  rotate: 0.5deg;
+  border-radius: var(--wobble-2);
+}
+
+[data-theme='paper'] .ov-card:hover {
+  border-color: var(--ink);
+  rotate: 0deg;
+  translate: -1px -2px;
+  transform: none;
+  box-shadow: var(--shadow);
+}
+
+[data-theme='paper'] :is(.ov-card.active, .ov-card.first) {
+  border-color: var(--accent);
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+}
+
+[data-theme='paper'] .ov-thumb {
+  border-bottom: 1.5px solid var(--ink);
+}
+
+[data-theme='paper'] .ov-text strong {
+  font-weight: 400;
+  font-size: 15px;
+}
+
+[data-theme='paper'] :is(.ov-star, .ov-close) {
+  border: 1.5px solid var(--ink);
+  border-radius: var(--wobble-round);
+  background: var(--bg-input);
+  color: var(--ink);
+}

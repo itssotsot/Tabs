@@ -1,0 +1,98 @@
+@import '@fontsource/patrick-hand/400.css';
+
+/*
+ * Paper: drawn by hand on paper, light or dark with the system. The tokens are shared by the browser UI and
+ * browserr:// pages; chrome.css and pages.css draw them (see chrome.css for how things look drawn).
+ */
+
+[data-theme='paper'] {
+  --font: 'Patrick Hand', 'Bradley Hand', 'Segoe Print', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+
+  --bg: #f1ebdd;
+  --bg-raised: #f8f4ea;
+  --bg-input: #fffdf8;
+  --bg-input-hover: #fffdf8;
+  --bg-popover: #fffdf8;
+  --thumb-empty: repeating-linear-gradient(-45deg, var(--bg-hover) 0 6px, transparent 6px 12px);
+  --bg-hover: rgb(44 41 36 / 0.06);
+  --bg-active: rgb(44 41 36 / 0.1);
+  --border: #cbc1ad;
+  --border-strong: var(--ink);
+
+  --text: #2c2924;
+  --text-muted: #6d665b;
+  --text-faint: #9c9486;
+  /* A blue ballpoint and a red pencil. */
+  --accent: #2f5bd3;
+  --accent-2: #d64533;
+  --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+  --on-accent: var(--bg-raised);
+  --danger: #c0392b;
+  --ok: #2f8a4c;
+  --warning: #c47a00;
+  --star: #d49b06;
+
+  /* Pale group colors are darkened to show on the paper. */
+  --group-mark-min: 0;
+  --group-mark-max: 0.62;
+
+  /* Shadows are hard and offset, like a sheet laid on another. */
+  --drop: rgb(44 41 36 / 0.16);
+  --shadow: 4px 5px 0 var(--drop);
+  --shadow-sm: 2px 3px 0 var(--drop);
+  --bar-shadow: var(--shadow-sm);
+  --bar-open-shadow: 2px 3px 0 var(--drop);
+  --scrim: rgb(44 41 36 / 0.25);
+
+  /* Paper's own. */
+  --ink: #2c2924;
+  /* A highlighter: what's selected, or on. */
+  --highlight: rgb(255 208 60 / 0.5);
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .3 0 0 0 0 .25 0 0 0 0 .16 .55 0 0 0 -.2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  /* Uneven corners: each drawn with a different sweep, so no two look ruled. */
+  --wobble: 14px 5px 12px 4px / 4px 12px 5px 14px;
+  --wobble-2: 5px 13px 4px 12px / 12px 4px 14px 5px;
+  --wobble-round: 52% 48% 55% 45% / 47% 55% 45% 53%;
+  /* Masks for long pencil lines, colored with a background. */
+  --pencil-line-v: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='140'%3E%3Cpath d='M2 0C1 25 3 45 2 70S1 115 2 140' fill='none' stroke='%23000' stroke-width='1.4'/%3E%3C/svg%3E");
+  --pencil-line-h: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='4'%3E%3Cpath d='M0 2C30 1 60 3 90 2S150 1 180 2' fill='none' stroke='%23000' stroke-width='1.4'/%3E%3C/svg%3E");
+
+  color-scheme: light;
+  /* The hand is small for its size; this scales every size up to read like the default font. */
+  font-size-adjust: 0.56;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme='paper'] {
+    --bg: #1d1c1a;
+    --bg-raised: #252421;
+    --bg-input: #2e2c28;
+    --bg-input-hover: #2e2c28;
+    --bg-popover: #2e2c28;
+    --bg-hover: rgb(235 229 216 / 0.06);
+    --bg-active: rgb(235 229 216 / 0.11);
+    --border: #4a463e;
+
+    --text: #ebe5d8;
+    --text-muted: #b4ad9f;
+    --text-faint: #807a6e;
+    --accent: #93b3ff;
+    --accent-2: #ff8d75;
+    --danger: #ff8a80;
+    --ok: #7fd49a;
+    --warning: #f2b33d;
+    --star: #f5c542;
+
+    --group-mark-min: 0.62;
+    --group-mark-max: 1;
+
+    --drop: rgb(0 0 0 / 0.4);
+    --scrim: rgb(0 0 0 / 0.35);
+
+    --ink: #ebe5d8;
+    --highlight: rgb(255 208 60 / 0.2);
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 .96 0 0 0 0 .88 .3 0 0 0 -.12'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+
+    color-scheme: dark;
+  }
+}

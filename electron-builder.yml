@@ -34,8 +34,16 @@ mac:
   category: public.app-category.productivity
   # The updater picks this Mac's DMG by the arch in its name.
   artifactName: ${productName}-${version}-${arch}.${ext}
-  # Apple Silicon only (since 0.3.1): Intel Macs stay on 0.3.0. The zip is what makes electron-builder
-  # write latest-mac.yml, which the updater reads (it then downloads the DMG).
+  # The personal Apple ID's certificate (team P8MQ267KS3). The Mac updater only installs apps signed by the
+  # same team as the running one, so every release must use it; without it the build fails rather than
+  # falling back to an unsigned app. Renew it for free in Xcode › Settings › Accounts › Manage Certificates.
+  identity: s.kaniras@gmail.com
+  # Camera, microphone and location for sites (see the file); the helpers need them too, as Chromium opens
+  # devices from one.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Apple Silicon only. The zip is what the Mac updater installs
+  # (and what makes electron-builder write latest-mac.yml); the DMG is for first installs and the fallback.
   target:
     - target: dmg
       arch: [arm64]
@@ -45,16 +53,25 @@ mac:
     NSCameraUsageDescription: Websites you visit can ask to use your camera.
     NSMicrophoneUsageDescription: Websites you visit can ask to use your microphone.
     NSLocationUsageDescription: Websites you visit can ask for your location.
+    NSLocationWhenInUseUsageDescription: Websites you visit can ask for your location.
+    # macOS 15+ asks before an app reaches devices on your network (routers, printers, other computers).
+    NSLocalNetworkUsageDescription: Websites you visit can connect to devices on your network, like your router, a printer or another computer.
+    # What macOS's questions about these folders say: downloads are saved there, and you can upload files from them.
+    NSDownloadsFolderUsageDescription: Tabs saves your downloads here, and you can upload files from it to websites.
+    NSDesktopFolderUsageDescription: You can upload files from your Desktop to websites, and save downloads there.
+    NSDocumentsFolderUsageDescription: You can upload files from your Documents to websites, and save downloads there.
     CFBundleDocumentTypes:
       - CFBundleTypeName: HTML document
         CFBundleTypeRole: Viewer
         LSItemContentTypes: [public.html]
 win:
-  # Intel/AMD only (since 0.3.1). Windows on ARM runs it emulated, and ARM installs update to it.
+  # Intel/AMD only. Windows on ARM runs it emulated.
   target:
     - target: nsis
       arch: [x64]
 nsis:
+  # Keeps installing when the old version's uninstaller fails (build/installer.nsh).
+  include: build/installer.nsh
   oneClick: false
   allowToChangeInstallationDirectory: true
   artifactName: ${productName}-Setup-${version}-${arch}.${ext}

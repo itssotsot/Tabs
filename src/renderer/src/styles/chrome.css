@@ -1,25 +1,5 @@
 :root {
-  --bg: #161618;
-  --bg-raised: #1f1f23;
-  --bg-input: #2a2a2f;
-  --bg-hover: rgb(255 255 255 / 0.07);
-  --bg-active: rgb(255 255 255 / 0.12);
-  --border: #2e2e34;
-  --text: #ececef;
-  --text-muted: #9d9da8;
-  --text-faint: #6b6b76;
-  --accent: #8b5cf6;
-  --accent-2: #ec4899;
-  --accent-soft: rgb(139 92 246 / 0.18);
-  --danger: #f87171;
-  --ok: #4ade80;
-  --radius: 10px;
-  --shadow: 0 18px 50px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.06);
-  /* The address bar's shadow while the send picker comes out from under it, on the bar and on the picker. */
-  --bar-open-shadow: 0 2px 9px rgb(0 0 0 / 0.22);
-
-  color-scheme: dark;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif;
+  font-family: var(--font);
   font-size: 13px;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
@@ -143,7 +123,7 @@ kbd {
   border-radius: 9px;
   font-weight: 600;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: white;
+  color: var(--on-accent);
 }
 
 .primary-btn:hover:not(:disabled) {
@@ -177,7 +157,7 @@ kbd {
   padding: 0 4px;
   border-radius: 8px;
   background: var(--accent-2);
-  color: white;
+  color: var(--on-accent);
   font-size: 10px;
   font-weight: 700;
   line-height: 16px;
@@ -198,7 +178,7 @@ kbd {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 2px solid rgb(255 255 255 / 0.15);
+  border: 2px solid color-mix(in srgb, var(--text) 15%, transparent);
   border-top-color: var(--accent);
   animation: spin 0.7s linear infinite;
   flex: none;
@@ -245,7 +225,7 @@ kbd {
 }
 
 .tab:hover {
-  background: rgb(255 255 255 / 0.04);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   color: var(--text);
 }
 
@@ -333,7 +313,7 @@ kbd {
 }
 
 /* While × is hidden, and no 🔊 or ⏸ shows before it, the age sits in its place (moved, not resized, so the title doesn't shift). */
-.tab:not(.link-tab):not(.active):not(:hover):not(:has(.tab-audio:not(.gone), .tab-media:not(.paused))) .tab-age {
+.tab:not(.link-tab):not(.active):not(:hover):not(:has(.tab-audio:not(.gone), .tab-media:not(.paused), .tab-call, .tab-capture)) .tab-age {
   transform: translateX(28px);
 }
 
@@ -355,7 +335,8 @@ kbd {
 
 .tab-close,
 .tab-audio,
-.tab-media {
+.tab-media,
+.tab-call {
   flex: none;
   display: grid;
   place-items: center;
@@ -367,12 +348,29 @@ kbd {
 
 .tab-close:hover,
 .tab-audio:hover,
-.tab-media:hover {
+.tab-media:hover,
+.tab-call:hover {
   background: var(--bg-active);
   color: var(--text);
 }
 
-/* 🔊 ⏸ × sit close together. */
+/* The devices a tab is using, in the color of a recording light. */
+.tab-capture {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 3px;
+  color: var(--danger);
+}
+
+/* A muted mic or a camera that's off, as the call shows them. */
+.tab-call.off,
+.tab-call.off:hover {
+  color: var(--danger);
+}
+
+/* 🎤 📷 🔊 ⏸ × sit close together. */
 .tab-actions {
   --actions-gap: 2px;
   flex: none;
@@ -427,9 +425,36 @@ kbd {
   min-width: 0;
 }
 
+/* However many tabs there are, the one you're on keeps room for its ×. */
+.tab.active:not(.pinned) {
+  min-width: 40px;
+}
+
 @container (max-width: 90px) {
   .tab-media {
     display: none;
+  }
+}
+
+/* Too narrow for a title: a tab is just its icon, and the one you're on just its × (middle-click still closes the others).
+   Centered in the tab even when it's narrower than the icon: the tab has 2px more padding on its left. */
+@container (max-width: 64px) {
+  .tab:not(.pinned) > :not(:first-child, .media-bar) {
+    display: none;
+  }
+
+  .tab:not(.pinned) > :first-child,
+  .tab.active:not(.pinned) > .tab-actions {
+    translate: calc(50cqw - 50% - 2px) 0;
+  }
+
+  .tab.active:not(.pinned) > :first-child,
+  .tab.active:not(.pinned) .tab-actions > :not(.tab-close) {
+    display: none;
+  }
+
+  .tab.active:not(.pinned) > .tab-actions {
+    display: flex;
   }
 }
 
@@ -461,7 +486,7 @@ kbd {
   height: var(--bar);
   border-radius: 2px;
   overflow: hidden;
-  background: rgb(255 255 255 / 0.12);
+  background: var(--bg-active);
   transition: height 0.12s;
 }
 
@@ -469,7 +494,7 @@ kbd {
   position: absolute;
   inset: 0;
   transform-origin: left;
-  background: white;
+  background: var(--text);
 }
 
 .media-fill.moving {
@@ -534,7 +559,7 @@ kbd {
 }
 
 .omnibox:hover {
-  background: #313137;
+  background: var(--bg-input-hover);
 }
 
 .omnibox input {
@@ -590,11 +615,28 @@ kbd {
 }
 
 .omnibox-icon.insecure {
-  color: #fbbf24;
+  color: var(--warning);
+}
+
+/* The tab is using your camera, microphone or screen (see TabState.capture). */
+.omnibox-capture {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.omnibox-capture:hover {
+  background: color-mix(in srgb, var(--danger) 26%, transparent);
 }
 
 .omnibox-star.on {
-  color: #facc15;
+  color: var(--star);
 }
 
 .omnibox-chip {
@@ -617,11 +659,11 @@ kbd {
   border-radius: 13px;
   font-weight: 600;
   color: var(--accent);
-  background: rgb(139 92 246 / 0.14);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .update-btn:hover {
-  background: rgb(139 92 246 / 0.24);
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .avatar-btn {
@@ -725,7 +767,7 @@ kbd {
 .segment.active {
   background: var(--bg-input);
   color: var(--text);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  box-shadow: var(--shadow-sm);
 }
 
 .segment .count {
@@ -733,7 +775,7 @@ kbd {
   padding: 0 4px;
   border-radius: 8px;
   background: var(--accent-2);
-  color: white;
+  color: var(--on-accent);
   font-size: 10px;
   font-weight: 700;
   line-height: 16px;
@@ -779,9 +821,9 @@ kbd {
   display: grid;
   place-items: center;
   border-radius: 18px;
-  color: white;
+  color: var(--on-accent);
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  box-shadow: 0 8px 30px rgb(139 92 246 / 0.35);
+  box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .onboarding .primary-btn {
@@ -1601,7 +1643,7 @@ body.overlay-body {
   margin: 0 0 8px;
   padding: 6px;
   border-radius: 14px;
-  background: #1c1c20;
+  background: var(--bg-popover);
   box-shadow: var(--shadow);
 }
 
@@ -1648,7 +1690,7 @@ body.overlay-body {
   display: flex;
   flex-direction: column;
   border-radius: 14px;
-  background: #1c1c20;
+  background: var(--bg-popover);
   /* The edge is drawn outside the box, so it doesn't change the size the window gave the panel. */
   box-shadow:
     0 0 0 1px var(--border),
@@ -1663,7 +1705,7 @@ body.overlay-body {
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  color: color-mix(in srgb, var(--group-mark) 60%, white);
+  color: color-mix(in srgb, var(--group-mark) 60%, var(--text));
   font-size: 12px;
   font-weight: 600;
 }
@@ -1739,7 +1781,7 @@ body.overlay-body {
   justify-content: center;
   align-items: flex-start;
   padding-top: 12vh;
-  background: rgb(0 0 0 / 0.35);
+  background: var(--scrim);
   animation: fade-in 0.12s ease-out;
 }
 
@@ -1749,7 +1791,7 @@ body.overlay-body {
   display: flex;
   flex-direction: column;
   border-radius: 18px;
-  background: #1c1c20;
+  background: var(--bg-popover);
   box-shadow: var(--shadow);
   overflow: hidden;
   animation: pop-in 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.2);
@@ -1774,8 +1816,7 @@ body.overlay-body {
  * the bar's shadow falling on it, so it reads as a layer behind the bar. It slides out from behind the bar by
  * script; its clip hides it while it's tucked up there.
  */
-.picker-tray {
-  --tray-inset: calc(100cqh / 2);
+.follows-page .picker-tray {
   --text: var(--panel-fg);
   --text-muted: color-mix(in srgb, var(--panel-fg) 68%, var(--panel-bg));
   --text-faint: color-mix(in srgb, var(--panel-fg) 45%, var(--panel-bg));
@@ -1784,6 +1825,10 @@ body.overlay-body {
   --bg-input: color-mix(in srgb, var(--panel-bg), var(--panel-fg) 7%);
   --bg: color-mix(in srgb, var(--panel-bg), var(--panel-fg) 5%);
   --border: color-mix(in srgb, var(--panel-bg), var(--panel-fg) 12%);
+}
+
+.picker-tray {
+  --tray-inset: calc(100cqh / 2);
   position: absolute;
   top: 100cqh;
   left: 50%;
@@ -1871,6 +1916,180 @@ body.overlay-body {
   from {
     opacity: 0;
   }
+}
+
+/* ---- the question under the address bar about what a site wants (overlay) ---- */
+
+/* The overlay is the card plus room for its shadow (PERMISSION_PROMPT_MARGIN). */
+.permission-prompt {
+  margin: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--bg-popover);
+  color: var(--text);
+  box-shadow:
+    0 0 0 1px var(--border),
+    var(--shadow);
+  animation: pop-in 0.12s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.prompt-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.prompt-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.prompt-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: -3px -3px 0 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.prompt-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.prompt-wants {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.prompt-wants li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.prompt-detail {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.prompt-detail strong {
+  color: var(--text);
+}
+
+.prompt-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prompt-preview {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-input);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.prompt-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Like a mirror, as calls show you. */
+  transform: scaleX(-1);
+}
+
+.prompt-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.prompt-device:hover {
+  background: var(--bg-input-hover);
+}
+
+.prompt-device select {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.prompt-level {
+  height: 4px;
+  margin: 0 8px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--bg-input);
+}
+
+.prompt-level div {
+  height: 100%;
+  background: var(--ok);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.06s linear;
+}
+
+.prompt-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prompt-btn {
+  height: 32px;
+  border-radius: 9px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.prompt-btn:hover {
+  background: var(--bg-input-hover);
+}
+
+.prompt-btn.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.prompt-btn.primary:hover {
+  filter: brightness(1.1);
 }
 
 @keyframes pop-in {
@@ -1963,7 +2182,7 @@ body.overlay-body {
 }
 
 .picker-friend.done {
-  background: rgb(74 222 128 / 0.08);
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
 }
 
 .picker-none {
@@ -2080,7 +2299,7 @@ body.overlay-body {
 }
 
 .star-btn.on {
-  color: #eab308;
+  color: var(--star);
 }
 
 .tab-star:not(.on),
@@ -2143,12 +2362,15 @@ body.overlay-body {
   display: contents;
 }
 
-/* The group color for thin marks and tinted text: dark ones (X's black) lightened just enough to show on the dark UI. */
+/*
+ * The group color for thin marks and tinted text, lightened or darkened just enough to show on the theme (in
+ * Default, dark ones like X's black are lightened for the dark UI).
+ */
 .tab-group,
 .tab.grouped,
 .group-peek,
 .drop-line.grouped {
-  --group-mark: oklch(from var(--group) max(l, 0.55) c h);
+  --group-mark: oklch(from var(--group) clamp(var(--group-mark-min), l, var(--group-mark-max)) c h);
 }
 
 .group-chip {
@@ -2162,7 +2384,7 @@ body.overlay-body {
   margin: 0 2px 0 4px;
   border-radius: 7px;
   background: color-mix(in srgb, var(--group-mark) 22%, transparent);
-  color: color-mix(in srgb, var(--group-mark) 60%, white);
+  color: color-mix(in srgb, var(--group-mark) 60%, var(--text));
   font-size: 12px;
   font-weight: 600;
   -webkit-app-region: no-drag;
@@ -2177,7 +2399,7 @@ body.overlay-body {
   /* White on most colors, black on pale ones (White, Butter, Peach). */
   color: oklch(from var(--group) clamp(0, (0.75 - l) * 1000, 1) 0 0);
   /* So a black group (X) still has an edge against the sidebar. */
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
 }
 
 .group-chip .avatar {
@@ -2195,7 +2417,7 @@ body.overlay-body {
   padding: 0 4px;
   border-radius: 8px;
   background: var(--accent-2);
-  color: white;
+  color: var(--on-accent);
   font-size: 10px;
   line-height: 15px;
   text-align: center;
@@ -2478,7 +2700,7 @@ body.overlay-body {
 }
 
 .ov-card:hover {
-  border-color: #45454d;
+  border-color: var(--border-strong);
   transform: translateY(-1px);
 }
 
@@ -2515,7 +2737,7 @@ body.overlay-body {
 .ov-thumb.empty {
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, #24242a, #1b1b1f);
+  background: var(--thumb-empty);
 }
 
 .ov-thumb.empty .favicon,
@@ -2580,7 +2802,7 @@ body.overlay-body {
 
 .ov-star.on {
   opacity: 1;
-  color: #eab308;
+  color: var(--star);
 }
 
 .ov-card:hover .ov-star,
@@ -2664,10 +2886,6 @@ html.resizing-vtabs * {
   margin-left: 0;
 }
 
-.vtabs-head .newtab-btn {
-  margin: 0;
-}
-
 .vtabs-spacer {
   flex: 1;
 }
@@ -2699,7 +2917,7 @@ html.resizing-vtabs * {
 
 .fav-tile:hover,
 .fav-grid .tab.pinned:hover {
-  background: #33333a;
+  background: var(--bg-input-hover);
 }
 
 .fav-tile.is-open {
@@ -2814,7 +3032,7 @@ html.resizing-vtabs * {
   padding: 0 4px;
   border-radius: 8px;
   background: var(--accent-2);
-  color: white;
+  color: var(--on-accent);
   font-size: 10px;
   font-weight: 700;
   line-height: 16px;
@@ -2909,7 +3127,7 @@ html.resizing-vtabs * {
 
 .vlink.archived .vlink-title {
   text-decoration: line-through;
-  text-decoration-color: rgb(255 255 255 / 0.25);
+  text-decoration-color: color-mix(in srgb, var(--text) 25%, transparent);
 }
 
 .vlink.archived .favicon {
@@ -3040,7 +3258,7 @@ html.resizing-vtabs * {
 
 .vtab-list .tab.active {
   background: var(--bg-input);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  box-shadow: var(--shadow-sm);
 }
 
 .vtab-list .tab::before {
@@ -3198,16 +3416,18 @@ html.resizing-vtabs * {
  * The toolbar extends the top of the page upward, so it reads as part of the site: `--page-edge` is the page's top
  * edge as a left-to-right gradient, and `--page` its main color (both read by the main process), which the buttons
  * and text are tinted from. Only the address bar keeps a surface; every other control is its own button floating on it.
+ * Only themes that follow the page's color (`.follows-page`, see ThemeInfo) get the page's colors and the tints; in
+ * the others `--page` is the theme's own toolbar color.
  */
 .chrome .chrome-header {
   --page: var(--bg-raised);
   --page-fg: oklch(from var(--page) clamp(0, (0.68 - l) * 1000, 1) 0 0);
   --page-lift: oklch(from var(--page) min(1, l + 0.07) c h);
-  --page-shadow: 0 1px 4px rgb(0 0 0 / 0.14);
+  --page-shadow: var(--bar-shadow);
 }
 
-.chrome .toolbar,
-.chrome .findbar {
+.chrome.follows-page .toolbar,
+.chrome.follows-page .findbar {
   --text: var(--page-fg);
   --text-muted: color-mix(in srgb, var(--page-fg) 68%, var(--page));
   --text-faint: color-mix(in srgb, var(--page-fg) 45%, var(--page));
@@ -3215,6 +3435,10 @@ html.resizing-vtabs * {
   --bg-active: color-mix(in srgb, var(--page-fg) 14%, transparent);
   --bg-input: color-mix(in srgb, var(--page), var(--page-fg) 8%);
   --border: color-mix(in srgb, var(--page), var(--page-fg) 14%);
+}
+
+.chrome .toolbar,
+.chrome .findbar {
   /* The edge spans only the page; above an open sidebar it's the main color. */
   background: var(--page-edge, none) 0 0 / var(--page-edge-width, 100%) 100% no-repeat var(--page);
   color: var(--text);
@@ -3332,4 +3556,72 @@ html.resizing-vtabs * {
   background: var(--bg-input);
   box-shadow: var(--bar-open-shadow);
   transition: box-shadow 0.2s;
+}
+
+/* ---- What's new, below the toolbar after an update ---- */
+
+.whats-new {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 10px 8px;
+  padding: 10px 8px 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-raised);
+  -webkit-app-region: no-drag;
+}
+
+.whats-new-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.whats-new-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.whats-new-body ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.whats-new-body li strong {
+  color: var(--text);
+}
+
+.whats-new-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.whats-new-link,
+.whats-new-done {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  font-weight: 600;
+}
+
+.whats-new-link {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.whats-new-link:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.whats-new-done {
+  color: var(--text-muted);
+}
+
+.whats-new-done:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }

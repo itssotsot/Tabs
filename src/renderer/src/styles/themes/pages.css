@@ -1,0 +1,5 @@
+/* Every theme, for browserr:// pages (see chrome.css here for how a theme is laid out). */
+@import './default/tokens.css';
+@import './default/pages.css';
+@import './paper/tokens.css';
+@import './paper/pages.css';

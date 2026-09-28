@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Bookmark, TabState } from '@shared/types'
-import { findLinks, pageKey, prettyUrl } from '@shared/url'
-import { parseYouTube, youTubeThumbnail } from '@shared/youtube'
+import { knownLink, pageKey } from '@shared/links'
+import { findLinks, prettyUrl } from '@shared/url'
 import { setArchivedLinks, watchArchivedLinks, watchMessages, type ArchivedLinks, type Message, type Room } from '../../social/api'
 import { useSocial } from '../../social/SocialProvider'
 
@@ -84,8 +84,7 @@ export function linksInMessage(roomId: string, m: Message): LinkParts[] {
     const page = pageKey(url)
     if (pages.has(page)) return
     pages.add(page)
-    const yt = parseYouTube(url)
-    out.push({ key: `${roomId}/${m.id}#${i + 1}`, url, title: prettyUrl(url), thumbnail: yt ? youTubeThumbnail(yt) : null, timestampSec: null })
+    out.push({ key: `${roomId}/${m.id}#${i + 1}`, url, title: prettyUrl(url), thumbnail: knownLink(url)?.thumbnail ?? null, timestampSec: null })
   })
   return out
 }

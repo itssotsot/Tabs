@@ -6,8 +6,8 @@ import { RoomAvatar } from '../../ui/Avatar'
 import { popupMenu } from '../../ui/menu'
 import { cx, timeAgo } from '../../ui/util'
 import { pageKey, useLinks, type SharedLink } from './links'
-import { hasMediaBar, MediaButton, MediaProgress, MuteButton } from './media'
-import { LayoutButton, LinkIcon, linkTooltip, MarqueeText, NewTabButton, StarButton, TabIcon, TabItem, useLinkCaption, useLinkMenu, useStoredState, useTabDrag } from './parts'
+import { CallButtons, CaptureSigns, hasMediaBar, MediaButton, MediaProgress, MuteButton } from './media'
+import { LayoutButton, LinkIcon, linkTooltip, MarqueeText, StarButton, TabIcon, TabItem, useLinkCaption, useLinkMenu, useStoredState, useTabDrag } from './parts'
 import { closeGroupPeek, SiteGroupedTabs, siteGroups, useCollapsedSites } from './SiteGroups'
 
 const ROOM_PREVIEW = 4
@@ -99,7 +99,6 @@ export const VerticalTabs = forwardRef<HTMLElement, Props>(function VerticalTabs
         {state.profile && <span className="profile-chip">{state.profile}</span>}
         <span className="vtabs-spacer" />
         <LayoutButton layout={layout} />
-        <NewTabButton />
       </div>
 
       <div className="vtabs-body" onDragEnd={drag.end} onScroll={closeGroupPeek}>
@@ -340,6 +339,8 @@ function LinkRow({ link, tab, active, onOpen, onArchive }: LinkRowProps): ReactN
       <MarqueeText className="vlink-title" text={title} />
       {tab && (
         <span className="tab-actions">
+          <CaptureSigns tab={tab} />
+          <CallButtons tab={tab} />
           <MuteButton tab={tab} animated />
           <MediaButton tab={tab} />
         </span>

@@ -3,14 +3,16 @@ import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import type { ImportChoice, ImportCounts, ImportPreview, ImportSource } from '@shared/types'
-import { pageKey } from '@shared/url'
+import { pageKey } from '@shared/links'
 import { bookmarksChanged } from './broadcast'
+import { arcTabs, chromiumTabs, firefoxTabs, safariTabs, type OpenTab } from './import-tabs'
+import { parseBinaryPlist } from './plist'
 import { store } from './store'
 
 /**
- * Bookmarks and history from the other browsers on this computer. Favorites here are a short list at the top of
- * the tabs, so only the bookmarks bar comes over (folders on it flattened); history comes over in full up to the
- * store's limit.
+ * Bookmarks, history and open tabs from the other browsers on this computer. Favorites here are a short list at
+ * the top of the tabs, so only the bookmarks bar comes over (folders on it flattened); history comes over in full
+ * up to the store's limit; open tabs come over asleep, like restored ones (see import-tabs.ts).
  */
 
 type Kind = ImportSource['kind']
@@ -32,6 +34,7 @@ interface Visited extends Page {
 
 const FAVORITES_LIMIT = 16
 const HISTORY_LIMIT = 10_000
+const TABS_LIMIT = 100
 const isWeb = (url: unknown): url is string => typeof url === 'string' && /^https?:\/\//i.test(url) && url.length < 4096
 
 const home = app.getPath('home')
@@ -273,80 +276,6 @@ async function firefoxHistory(dir: string): Promise<Visited[]> {
 
 // ---- Safari ----
 
-/** Reads a binary property list (Safari's Bookmarks.plist). Dates and data come back as null. */
-export function parseBinaryPlist(buf: Buffer): unknown {
-  if (buf.subarray(0, 8).toString('latin1') !== 'bplist00') throw new Error('Not a binary plist')
-  const trailer = buf.subarray(buf.length - 32)
-  const offsetSize = trailer[6]
-  const refSize = trailer[7]
-  const count = Number(trailer.readBigUInt64BE(8))
-  const top = Number(trailer.readBigUInt64BE(16))
-  const table = Number(trailer.readBigUInt64BE(24))
-  const uint = (at: number, size: number): number => {
-    let n = 0
-    for (let i = 0; i < size; i++) n = n * 256 + buf[at + i]
-    return n
-  }
-  const offsets = Array.from({ length: count }, (_, i) => uint(table + i * offsetSize, offsetSize))
-  const depth = new Set<number>()
-
-  const read = (ref: number): unknown => {
-    if (depth.has(ref) || depth.size > 64) throw new Error('Bad plist')
-    depth.add(ref)
-    try {
-      return readObject(offsets[ref])
-    } finally {
-      depth.delete(ref)
-    }
-  }
-
-  const readObject = (at: number): unknown => {
-    const marker = buf[at]
-    const type = marker >> 4
-    const info = marker & 0xf
-    // The length of strings, arrays and so on, and where their contents start.
-    const sized = (): [number, number] => {
-      if (info !== 0xf) return [info, at + 1]
-      const intSize = 1 << (buf[at + 1] & 0xf)
-      return [uint(at + 2, intSize), at + 2 + intSize]
-    }
-    switch (type) {
-      case 0x0:
-        return info === 0x9 ? true : info === 0x8 ? false : null
-      case 0x1:
-        return uint(at + 1, 1 << info)
-      case 0x2:
-        return info === 2 ? buf.readFloatBE(at + 1) : buf.readDoubleBE(at + 1)
-      case 0x5: {
-        const [len, start] = sized()
-        return buf.toString('latin1', start, start + len)
-      }
-      case 0x6: {
-        const [len, start] = sized()
-        const chars = Buffer.from(buf.subarray(start, start + len * 2))
-        return chars.swap16().toString('utf16le')
-      }
-      case 0xa: {
-        const [len, start] = sized()
-        return Array.from({ length: len }, (_, i) => read(uint(start + i * refSize, refSize)))
-      }
-      case 0xd: {
-        const [len, start] = sized()
-        const dict: Record<string, unknown> = {}
-        for (let i = 0; i < len; i++) {
-          const key = read(uint(start + i * refSize, refSize))
-          if (typeof key === 'string') dict[key] = read(uint(start + (len + i) * refSize, refSize))
-        }
-        return dict
-      }
-      default:
-        return null
-    }
-  }
-
-  return read(top)
-}
-
 interface SafariNode {
   Title?: string
   WebBookmarkType?: string
@@ -398,6 +327,19 @@ async function readHistory(s: Found): Promise<Visited[]> {
   return (await read[s.kind](s.dir)).filter((v) => isWeb(v.url) && Number.isFinite(v.lastVisit))
 }
 
+/** The other browser's open tabs, each page once, and how many that was before the limit. */
+function readTabs(s: Found): { tabs: OpenTab[]; found: number } {
+  const tabs = s.kind === 'firefox' ? firefoxTabs(s.dir) : s.kind === 'safari' ? safariTabs(s.dir) : s.browser === 'Arc' ? arcTabs(s.dir) : chromiumTabs(s.dir)
+  const seen = new Set<string>()
+  const unique = tabs.filter((t) => {
+    const key = pageKey(t.url)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  return { tabs: unique.slice(0, TABS_LIMIT), found: unique.length }
+}
+
 const isDenied = (err: unknown): boolean => ['EPERM', 'EACCES'].includes((err as NodeJS.ErrnoException)?.code ?? '')
 
 /** Reading can fail on its own (a missing file, a changed format); the other half still counts. Being denied access doesn't. */
@@ -422,21 +364,28 @@ export async function previewImport(id: unknown): Promise<ImportPreview | null> 
   const s = sourceFor(id)
   try {
     if (s.kind === 'safari') readdirSync(s.dir)
-    const [favorites, history] = await Promise.all([
+    const [favorites, history, tabs] = await Promise.all([
       attempt('favorites', () => readFavorites(s), { pages: [], found: 0 }),
-      attempt('history', () => readHistory(s), [])
+      attempt('history', () => readHistory(s), []),
+      attempt('tabs', () => readTabs(s), { tabs: [], found: 0 })
     ])
-    return { favorites: favorites.pages.length, favoritesFound: favorites.found, history: history.length }
+    return {
+      favorites: favorites.pages.length,
+      favoritesFound: favorites.found,
+      history: history.length,
+      tabs: tabs.tabs.length,
+      tabsFound: tabs.found
+    }
   } catch (err) {
     if (isDenied(err)) return null
     throw err
   }
 }
 
-/** Brings the chosen things over. Returns how many were added. */
-export async function runImport(id: unknown, choice: ImportChoice): Promise<ImportCounts> {
+/** Brings the chosen things over; `openTabs` opens tabs in the window importing and says how many it opened. Returns how many were added. */
+export async function runImport(id: unknown, choice: ImportChoice, openTabs: (tabs: OpenTab[]) => number): Promise<ImportCounts> {
   const s = sourceFor(id)
-  const counts: ImportCounts = { favorites: 0, history: 0 }
+  const counts: ImportCounts = { favorites: 0, history: 0, tabs: 0 }
   if (choice.favorites) {
     const { pages } = await attempt('favorites', () => readFavorites(s), { pages: [], found: 0 })
     counts.favorites = store.importBookmarks(pages)
@@ -444,6 +393,9 @@ export async function runImport(id: unknown, choice: ImportChoice): Promise<Impo
   }
   if (choice.history) {
     counts.history = store.importHistory(await attempt('history', () => readHistory(s), []))
+  }
+  if (choice.tabs) {
+    counts.tabs = openTabs((await attempt('tabs', () => readTabs(s), { tabs: [], found: 0 })).tabs)
   }
   return counts
 }

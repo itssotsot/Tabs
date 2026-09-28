@@ -1,8 +1,8 @@
 import { app, clipboard, dialog, Menu, nativeImage, shell, type ContextMenuParams, type MenuItemConstructorOptions, type NativeImage, type WebContents } from 'electron'
 import { MENU_ROLES, type MenuSpec } from '@shared/api'
 import { GROUP_COLORS } from '@shared/colors'
-import { TAB_LAYOUTS } from '@shared/constants'
-import type { TabLayout } from '@shared/types'
+import { SITE_PERMISSIONS, TAB_LAYOUTS, THEMES } from '@shared/constants'
+import type { PermissionDecision, SitePermission, TabLayout } from '@shared/types'
 import { INTERNAL_SCHEME, looksLikeUrl, searchUrl, SEARCH_ENGINE_NAMES, toNavigableUrl } from '@shared/url'
 import { bookmarksChanged, settingsChanged, toggleBookmark } from './broadcast'
 import { extensionHooks } from './extension-hooks'
@@ -62,6 +62,18 @@ function tabLayoutItems(): Item[] {
   }))
 }
 
+function themeItems(): Item[] {
+  return THEMES.map((t) => ({
+    label: t.name,
+    type: 'radio',
+    checked: store.settings.theme === t.id,
+    click: () => {
+      store.updateSettings({ theme: t.id })
+      settingsChanged()
+    }
+  }))
+}
+
 // ---- application menu (also provides the keyboard shortcuts) ----
 
 export function buildAppMenu(): void {
@@ -97,7 +109,7 @@ export function buildAppMenu(): void {
         { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', click: withWindow((c) => c.reopenClosedTab()) },
         { label: 'Open Location…', accelerator: 'CmdOrCtrl+L', click: withWindow((c) => c.focusOmnibox()) },
         separator,
-        { label: 'Import Bookmarks and History…', click: withWindow((c) => c.sendCommand({ type: 'show-import' })) },
+        { label: 'Import from Another Browser…', click: withWindow((c) => c.sendCommand({ type: 'show-import' })) },
         separator,
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: withWindow((c) => c.closeActiveTab()) },
         { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', click: withWindow((c) => c.win.close()) },
@@ -153,6 +165,7 @@ export function buildAppMenu(): void {
           click: withWindow((c) => c.sendCommand({ type: 'toggle-sidebar', panel: 'inbox' }))
         },
         { label: 'Tab Layout', submenu: tabLayoutItems() },
+        { label: 'Theme', submenu: themeItems() },
         { role: 'togglefullscreen' },
         separator,
         {
@@ -222,7 +235,11 @@ export function buildAppMenu(): void {
     },
     {
       role: 'help',
-      submenu: [{ label: 'Firebase Console', click: () => shell.openExternal('https://console.firebase.google.com/project/browserr-share') }]
+      submenu: [
+        { label: "What's New in Tabs", click: internal('whats-new') },
+        separator,
+        { label: 'Firebase Console', click: () => shell.openExternal('https://console.firebase.google.com/project/browserr-share') }
+      ]
     }
   ])
 
@@ -571,29 +588,22 @@ export function showSiteInfoMenu(c: BrowserWindowController): void {
     return
   }
   const secure = origin.startsWith('https:')
-  const permissions = Object.entries(store.sitePermissions(origin))
-  const names: Record<string, string> = {
-    media: 'Camera & microphone',
-    geolocation: 'Location',
-    notifications: 'Notifications',
-    'clipboard-read': 'Clipboard',
-    openExternal: 'Open external apps',
-    midi: 'MIDI devices',
-    midiSysex: 'MIDI devices (full control)',
-    'idle-detection': 'Idle detection',
-    'display-capture': 'Screen sharing'
-  }
+  const permissions = Object.entries(store.sitePermissions(origin)) as [SitePermission, PermissionDecision][]
+  const choice = (permission: SitePermission, decision: PermissionDecision | null, current: PermissionDecision): Item => ({
+    label: decision === 'allow' ? 'Allow' : decision === 'deny' ? 'Block' : 'Ask Next Time',
+    type: 'radio',
+    checked: decision === current,
+    click: () => store.setPermission(origin, permission, decision)
+  })
 
   Menu.buildFromTemplate(
     compact([
       { label: origin.replace(/^https?:\/\//, ''), enabled: false },
       { label: secure ? '🔒 Connection is secure' : '⚠️ Connection is not secure', enabled: false },
       separator,
-      ...permissions.map(([perm, decision]): Item => ({
-        label: `${names[perm] ?? perm}: ${decision === 'allow' ? 'Allowed' : 'Blocked'}`,
-        click: () => {
-          store.setPermission(origin, perm, decision === 'allow' ? 'deny' : 'allow')
-        }
+      ...permissions.map(([permission, decision]): Item => ({
+        label: `${SITE_PERMISSIONS[permission]?.name ?? permission}: ${decision === 'allow' ? 'Allowed' : 'Blocked'}`,
+        submenu: [choice(permission, 'allow', decision), choice(permission, 'deny', decision), choice(permission, null, decision)]
       })),
       permissions.length > 0 && separator,
       permissions.length > 0 && {
@@ -609,7 +619,44 @@ export function showSiteInfoMenu(c: BrowserWindowController): void {
           await tab.wc.session.clearStorageData({ origin })
           tab.reload()
         }
-      }
+      },
+      separator,
+      { label: 'Site Settings…', click: () => c.createTab(`${INTERNAL_SCHEME}://settings/#site-access`) }
+    ])
+  ).popup({ window: c.win })
+}
+
+// ---- the camera, microphone and screen sign in the address bar ----
+
+export function showCaptureMenu(c: BrowserWindowController): void {
+  const tab = c.activeTab
+  const capture = tab?.capture
+  if (!tab || !capture) return
+  let origin: string
+  try {
+    origin = new URL(tab.url).origin
+  } catch {
+    return
+  }
+  const using = (['camera', 'microphone', 'screen'] as const).filter((d) => capture[d])
+  const devices = using.filter((d): d is 'camera' | 'microphone' => d !== 'screen')
+  const names = { camera: 'Camera', microphone: 'Microphone' }
+  Menu.buildFromTemplate(
+    compact([
+      { label: `${origin.replace(/^https?:\/\//, '')} is using your ${using.join(' and ')}`, enabled: false },
+      separator,
+      ...using.map((d): Item => ({ label: d === 'screen' ? 'Stop Sharing Screen' : `Stop Using ${names[d]}`, click: () => tab.stopCapture(d) })),
+      separator,
+      ...devices.map(
+        (d): Item => ({
+          label: `Always Block ${names[d]} on This Site`,
+          click: () => {
+            store.setPermission(origin, d, 'deny')
+            tab.stopCapture(d)
+          }
+        })
+      ),
+      { label: 'Site Settings…', click: () => c.createTab(`${INTERNAL_SCHEME}://settings/#site-access`) }
     ])
   ).popup({ window: c.win })
 }
@@ -643,28 +690,11 @@ export function showAppMenu(c: BrowserWindowController, x: number, y: number): v
       tab && { label: 'Developer Tools', click: () => tab.toggleDevTools() },
       separator,
       { label: 'Settings', click: internal('settings') },
+      { label: "What's New", click: internal('whats-new') },
       update && { label: `Update to Tabs ${update.version}`, click: () => void installUpdate() },
       { label: isMac ? 'Quit Tabs' : 'Exit', click: () => app.quit() }
     ])
   ).popup({ window: c.win, x: Math.round(x), y: Math.round(y) })
-}
-
-// ---- the tab layout picker in the tab strip ----
-
-export function showTabLayoutMenu(c: BrowserWindowController, x: number, y: number): void {
-  Menu.buildFromTemplate([
-    { label: 'Tab Layout', enabled: false },
-    ...TAB_LAYOUTS.map(
-      (l, i): Item => ({
-        label: l.name,
-        sublabel: l.description,
-        type: 'radio',
-        accelerator: `CmdOrCtrl+Alt+${i + 1}`,
-        checked: store.settings.tabLayout === l.id,
-        click: () => setTabLayout(l.id)
-      })
-    )
-  ]).popup({ window: c.win, x: Math.round(x), y: Math.round(y) })
 }
 
 // ---- right-click on a favorite ----

@@ -1,0 +1,8 @@
+/*
+ * Every theme, for the browser UI and the overlay. Each theme is a folder: tokens.css (its colors, fonts and
+ * shadows, under [data-theme='<id>']), and, if it changes more than colors, chrome.css and pages.css. Default's
+ * tokens come first: they're on :root, so they fill in any a theme leaves out. See ThemeInfo for the rest.
+ */
+@import './default/tokens.css';
+@import './paper/tokens.css';
+@import './paper/chrome.css';

@@ -3,13 +3,17 @@ import { createRoot } from 'react-dom/client'
 import type { OverlayState } from '@shared/types'
 import { SocialProvider } from '../social/SocialProvider'
 import '../styles/chrome.css'
+import '../styles/themes/chrome.css'
+import { installPaperFilters } from '../ui/paper'
 import { disableMiddleClickAutoscroll } from '../ui/util'
 import { GroupPeek } from './GroupPeek'
+import { PermissionPrompt } from './PermissionPrompt'
 import { SendPicker } from './SendPicker'
 import { Suggestions } from './Suggestions'
 
 document.documentElement.dataset.platform = window.browserr.platform
 disableMiddleClickAutoscroll()
+installPaperFilters()
 
 function Overlay(): ReactNode {
   const [state, setState] = useState<OverlayState>({ mode: 'hidden' })
@@ -31,6 +35,7 @@ function Overlay(): ReactNode {
   if (state.mode === 'suggestions') return <Suggestions items={state.items} selected={state.selected} />
   if (state.mode === 'send') return <SendPicker key={openCount} draft={state.draft} more={state.more} anchor={state.anchor} windowWidth={state.windowWidth} />
   if (state.mode === 'group') return <GroupPeek state={state} />
+  if (state.mode === 'permission') return <PermissionPrompt prompt={state.prompt} />
   return null
 }
 

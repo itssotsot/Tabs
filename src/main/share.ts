@@ -1,24 +1,21 @@
 import type { ShareDraft } from '@shared/types'
-import { cleanYouTubeTitle, parseYouTube, youTubeStart, youTubeThumbnail, youTubeUrl } from '@shared/youtube'
+import { cleanTitle, cleanUrl, knownLink } from '@shared/links'
 import { webSession } from './env'
+import { siteName, siteOf } from './sites'
 import type { Tab } from './tab'
 
 interface PageMeta {
   title: string
   image: string | null
-  time: number | null
 }
 
 // Runs in an isolated world so the page can't tamper with it.
 const READ_META = `(() => {
   const meta = (sel) => document.querySelector(sel)?.getAttribute('content') || null
   const image = meta('meta[property="og:image"]') || meta('meta[name="twitter:image"]')
-  const video = document.querySelector('#movie_player video, video')
-  const time = video && Number.isFinite(video.currentTime) ? Math.floor(video.currentTime) : null
   return {
     title: meta('meta[property="og:title"]') || document.title,
-    image: image ? new URL(image, location.href).href : null,
-    time
+    image: image ? new URL(image, location.href).href : null
   }
 })()`
 
@@ -34,38 +31,33 @@ async function readMeta(tab: Tab): Promise<PageMeta | null> {
   }
 }
 
+/** The page's title without an unread count or the site's name ("(3) Some video - YouTube" -> "Some video"). */
+function titleOf(title: string, url: string): string {
+  const site = siteOf(url)
+  return cleanTitle(title, site ? [siteName(site)] : [])
+}
+
 export async function draftFromTab(tab: Tab): Promise<ShareDraft | null> {
   const url = tab.url
   if (!/^https?:/.test(url)) return null
-
-  const youtube = parseYouTube(url)
-  if (youtube) {
-    const meta = await readMeta(tab)
-    return {
-      url: youTubeUrl(youtube),
-      // og:title goes stale while YouTube navigates between videos, so prefer the tab title.
-      title: cleanYouTubeTitle(tab.title || meta?.title || 'YouTube video'),
-      thumbnail: youTubeThumbnail(youtube),
-      timestampSec: youtube.kind === 'video' ? (meta?.time ?? null) : null
-    }
-  }
-
+  const known = knownLink(url)
   const meta = await readMeta(tab)
   return {
-    url,
-    title: tab.title || meta?.title || url,
-    thumbnail: meta?.image ?? null,
-    timestampSec: null
+    url: known?.url ?? cleanUrl(url),
+    // og:title goes stale while single-page sites (YouTube) move between pages, so prefer the tab title.
+    title: titleOf(tab.title || meta?.title || known?.fallbackTitle || url, url),
+    thumbnail: known?.thumbnail ?? meta?.image ?? null,
+    timestampSec: known?.at ? tab.mediaPosition : null
   }
 }
 
 export function draftFromLink(url: string, text: string): ShareDraft | null {
   if (!/^https?:/.test(url)) return null
-  const youtube = parseYouTube(url)
+  const known = knownLink(url)
   return {
-    url: youtube ? youTubeUrl(youtube) : url,
+    url: known?.url ?? cleanUrl(url),
     title: text.trim() || url,
-    thumbnail: youtube ? youTubeThumbnail(youtube) : null,
+    thumbnail: known?.thumbnail ?? null,
     timestampSec: null
   }
 }
@@ -111,8 +103,7 @@ function metaFromHtml(html: string, baseUrl: string): PageMeta {
   }
   return {
     title: tags.get('og:title') ?? tags.get('twitter:title') ?? (titleTag ? decodeEntities(titleTag).replace(/\s+/g, ' ').trim() : ''),
-    image: imageUrl && /^https?:/.test(imageUrl) ? imageUrl : null,
-    time: null
+    image: imageUrl && /^https?:/.test(imageUrl) ? imageUrl : null
   }
 }
 
@@ -143,14 +134,16 @@ async function readHead(url: string): Promise<{ html: string; finalUrl: string }
   }
 }
 
-async function youTubeTitle(url: string): Promise<string | null> {
+/** A page's title and thumbnail from its site's oEmbed request, which (unlike the page) needs no signing in or cookie wall. */
+async function readOEmbed(request: string): Promise<{ title: string | null; thumbnail: string | null } | null> {
   try {
-    const res = await webSession().fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-    })
+    const res = await webSession().fetch(request, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (!res.ok) return null
-    const data = (await res.json()) as { title?: unknown }
-    return typeof data.title === 'string' ? data.title : null
+    const data = (await res.json()) as { title?: unknown; thumbnail_url?: unknown }
+    return {
+      title: typeof data.title === 'string' && data.title.trim() ? data.title : null,
+      thumbnail: typeof data.thumbnail_url === 'string' && /^https:/.test(data.thumbnail_url) ? data.thumbnail_url : null
+    }
   } catch {
     return null
   }
@@ -158,27 +151,28 @@ async function youTubeTitle(url: string): Promise<string | null> {
 
 /**
  * Title and thumbnail for a link typed into a chat, the same things the send picker attaches.
- * Reads them from an open tab showing the page when there is one, otherwise from the page itself.
- * Keeps the URL as typed (including a YouTube start time).
+ * Reads them from an open tab showing the page when there is one, otherwise from the site's oEmbed or the page itself.
+ * Keeps the URL as typed (including a video's start time).
  */
 export async function draftFromUrl(url: string, openTab?: Tab): Promise<ShareDraft | null> {
   if (!/^https?:\/\//i.test(url)) return null
-  const youtube = parseYouTube(url)
-  const start = youtube?.kind === 'video' ? youTubeStart(url) : null
+  const known = knownLink(url)
+  const start = known?.at ? known.start : null
 
   if (openTab) {
     const fromTab = await draftFromTab(openTab)
     if (fromTab) return { ...fromTab, url, timestampSec: start }
   }
 
-  if (youtube) {
-    const title = await youTubeTitle(youTubeUrl(youtube))
-    return { url, title: title ? cleanYouTubeTitle(title) : 'YouTube video', thumbnail: youTubeThumbnail(youtube), timestampSec: start }
+  const fallback = known ? { url, title: known.fallbackTitle, thumbnail: known.thumbnail, timestampSec: start } : null
+  if (known?.oembed) {
+    const embed = await readOEmbed(known.oembed)
+    if (!embed) return fallback
+    return { url, title: titleOf(embed.title ?? known.fallbackTitle, url), thumbnail: known.thumbnail ?? embed.thumbnail, timestampSec: start }
   }
 
   const page = await readHead(url)
-  if (!page) return null
-  const meta = metaFromHtml(page.html, page.finalUrl)
-  if (!meta.title && !meta.image) return null
-  return { url, title: meta.title || url, thumbnail: meta.image, timestampSec: null }
+  const meta = page && metaFromHtml(page.html, page.finalUrl)
+  if (!meta || (!meta.title && !meta.image)) return fallback
+  return { url, title: meta.title ? titleOf(meta.title, url) : (known?.fallbackTitle ?? url), thumbnail: known?.thumbnail ?? meta.image, timestampSec: start }
 }

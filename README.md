@@ -20,18 +20,24 @@ Builds are unsigned for now. On macOS, a friend opening the app for the first ti
 
 ## Releasing updates
 
-Installed copies check [GitHub Releases](https://github.com/itssotsot/tabs/releases) 10 seconds after launch and every 4 hours (`src/main/updater.ts`), so friends only install by hand once. To ship a new version:
+Installed copies check [GitHub Releases](https://github.com/itssotsot/Tabs/releases) 10 seconds after launch and every 4 hours (`src/main/updater.ts`), so friends only install by hand once. To ship a new version:
 
 ```bash
+# first add a "## 0.0.2" section to CHANGELOG.md: what changed, in a few short "- " items
 npm version patch --no-git-tag-version   # or minor; the version must go up
-git commit -am "Release 0.2.1" && git push
+git commit -am "Release 0.0.2" && git push
 npm run release                          # builds Mac + Windows and publishes them (uses your `gh` login)
 ```
 
 - **Windows** downloads the update in the background. An **Update** button appears in the toolbar and restarts into the new version. If nobody clicks it, the update installs the next time the app quits.
-- **Mac** downloads the new DMG in the background and checks its hash. **Update** quits Tabs and opens the DMG, and you drag Tabs onto Applications to replace it. (Replacing the app in place needs a Developer ID signature, which the Mac build doesn't have.)
+- **Mac** downloads the new version in the background and checks that it's intact and signed by the same Apple team. **Update** restarts Tabs into it; otherwise it installs the next time Tabs quits. Tabs can only replace itself from a folder you can write to, like Applications (it offers to move there when opened from the DMG or Downloads); anywhere else, **Update** opens the new DMG for you to drag over.
+- Mac releases are signed with the personal Apple ID's free development certificate (`mac.identity` in `electron-builder.yml`), and must stay on that team: installed copies only install updates from the team they're signed by. `npm run release` refuses to build without a valid certificate for it. When it expires, create a new one in Xcode › Settings › Accounts › Manage Certificates › + › Apple Development.
+
+After an update, Tabs shows that version's notes from `CHANGELOG.md` under the toolbar, once. **Help › What's New** lists every version, and the same notes go on the GitHub release; `npm run release` won't release a version that has none.
 
 Both menus have **Check for Updates…**. Development builds and extra profiles (`--profile=…`) never update.
+
+To test Mac updates end to end, run a packaged copy with `BROWSERR_UPDATE_FEED=http://127.0.0.1:<port>` and `--profile=<name>`, serving a newer build's `latest-mac.yml` and zip from that address.
 
 ## Testing with two accounts
 
@@ -86,7 +92,7 @@ Electron itself doesn't support Chromium's back/forward cache (`BackForwardCache
 
 | Action | Shortcut |
 | --- | --- |
-| Send the current page to a friend or group | `⌘⇧S` / `Ctrl+Shift+S`, the **Send** button, the send icon in YouTube's player, or right-click → Send |
+| Send the current page to a friend or group | `⌘⇧S` / `Ctrl+Shift+S`, the **Send** button, or right-click → Send |
 | Open the inbox | `⌘⇧L` / `Ctrl+Shift+L` |
 | In the send picker | `↵` send · `⇧↵` send and keep open (to send to several chats) · `esc` close |
 
@@ -95,7 +101,8 @@ Plus the usual browser shortcuts: `⌘T`, `⌘W`, `⌘⇧T`, `⌘L`, `⌘F`, `�
 ## How it's built
 
 - `src/main` – Electron main process: windows, tabs (one `WebContentsView` each), menus, downloads, permissions, ad blocking, session restore, the Google sign-in bridge.
-- `src/preload` – `chrome.ts` (browser UI API) and `tab.ts` (runs in web pages: exposes nothing, except internal-page APIs on `browserr://` pages and the YouTube send button).
+- `src/preload` – `chrome.ts` (browser UI API) and `tab.ts` (runs in web pages: exposes nothing, except internal-page APIs on `browserr://` pages). What it does differently on some sites is in `sites/`.
+- `src/shared/links` – what links mean: which are the same page, the link to send, and what some sites' links say (a YouTube video's thumbnail and start time).
 - `src/renderer` – React UI: `chrome/` (tab strip, toolbar, sidebar), `overlay/` (address-bar dropdown and send picker, drawn above the page), `internal/` (new tab, history, bookmarks, settings, error pages), `auth/` (sign-in page opened in the system browser).
 - `firestore.rules` – who can read and write what. Only a room's members can read or post its messages. A direct chat (`dm_<uidA>_<uidB>`) can only be created by two accepted friends and goes away with the friendship. For group rooms, invitees (by uid, or by the verified email they sign in with) can see the room and join; anyone else needs its join code.
 

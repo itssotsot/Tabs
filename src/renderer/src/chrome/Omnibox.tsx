@@ -1,4 +1,4 @@
-import { AlertTriangle, Lock, RotateCw, Search, Send, Star, X } from 'lucide-react'
+import { AlertTriangle, Lock, Mic, MonitorUp, RotateCw, Search, Send, Star, Video, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { Suggestion, TabState } from '@shared/types'
 import { copyText, MENU_SEPARATOR, popupMenu } from '../ui/menu'
@@ -186,6 +186,13 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
       >
         <SecurityIcon size={14} strokeWidth={2} />
       </button>
+      {tab?.capture && !internalPage && (
+        <button className="omnibox-capture" tabIndex={-1} title="Camera, microphone and screen: stop or block" onClick={() => api.captureMenu()}>
+          {tab.capture.camera && <Video size={14} strokeWidth={2} />}
+          {tab.capture.microphone && <Mic size={14} strokeWidth={2} />}
+          {tab.capture.screen && <MonitorUp size={14} strokeWidth={2} />}
+        </button>
+      )}
       <input
         ref={inputRef}
         value={text}

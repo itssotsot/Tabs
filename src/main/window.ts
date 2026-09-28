@@ -6,28 +6,38 @@ import {
   GROUP_PEEK_PADDING,
   GROUP_PEEK_ROW_HEIGHT,
   GROUP_PEEK_WIDTH,
+  PERMISSION_PROMPT_MARGIN,
+  PERMISSION_PROMPT_WIDTH,
   SUGGESTION_PADDING,
   SUGGESTION_ROW_HEIGHT
 } from '@shared/constants'
 import type { ChromeCommand, Insets, OmniboxAnchor, OverlayState, Rect, ShareDraft, Suggestion, TabLink, WindowState } from '@shared/types'
-import { NEW_TAB_URL, pageKey } from '@shared/url'
+import { pageKey } from '@shared/links'
+import { NEW_TAB_URL } from '@shared/url'
 import { browserEvents } from './browser-events'
 import { extensionHooks } from './extension-hooks'
 import { chromePreload, profile, uiUrl, webSession } from './env'
 import { showChromeContextMenu, showPageContextMenu } from './menu'
+import { currentPrompt, prompts } from './permission-prompts'
 import { warmUp } from './predictor'
 import { draftFromTab } from './share'
 import { arrangeGroups, groupKey, siteColor, siteGroups, siteName } from './sites'
 import { store, type SavedTab, type SavedWindow } from './store'
 import { Tab, type TabHost, type TabSnapshot } from './tab'
+import { chromeColors } from './theme'
 
 const isMac = process.platform === 'darwin'
-const CHROME_BG = '#161618'
 /** How often the active page's top color is re-read for the toolbar, for changes that come without a paint or scroll hint. */
 const COLOR_SAMPLE_MS = 1000
 
 /** Every webContents we own (UI, overlay, tabs) -> its window controller. */
 const owners = new Map<number, BrowserWindowController>()
+
+// A page's question about what it wants changed: its window shows it, if the page is the one on screen.
+prompts.on('changed', (wc: WebContents) => controllerFor(wc)?.showPrompt())
+
+/** Until the overlay says how tall the question is. */
+const PROMPT_START_HEIGHT = 200
 /** Recently closed tabs (with their history), most recent last. Shared across windows like Chrome. */
 const closedTabs: SavedTab[] = []
 
@@ -120,6 +130,7 @@ export class BrowserWindowController implements TabHost {
   private overlayAttached = false
   /** Where the address bar is and how it looks, reported by the browser UI. The send picker grows out of it. */
   private omniboxAnchor: OmniboxAnchor | null = null
+  private promptHeight = PROMPT_START_HEIGHT
   private fullscreenTab: Tab | null = null
   private enteredFullscreenForTab = false
   private stateTimer: NodeJS.Timeout | null = null
@@ -131,6 +142,7 @@ export class BrowserWindowController implements TabHost {
   constructor(options: WindowOptions = {}) {
     const saved = options.restore
     const bounds = boundsOnScreen(saved?.bounds)
+    const colors = chromeColors()
     this.win = new BrowserWindow({
       width: 1360,
       height: 880,
@@ -139,11 +151,11 @@ export class BrowserWindowController implements TabHost {
       minHeight: 380,
       show: false,
       title: 'Tabs',
-      backgroundColor: CHROME_BG,
+      backgroundColor: colors.background,
       titleBarStyle: 'hidden',
       ...(isMac
         ? { trafficLightPosition: { x: 14, y: 13 } }
-        : { titleBarOverlay: { color: CHROME_BG, symbolColor: '#d4d4d8', height: 40 } }),
+        : { titleBarOverlay: { color: colors.bar, symbolColor: colors.symbols, height: 40 } }),
       webPreferences: {
         preload: chromePreload,
         sandbox: true,
@@ -196,6 +208,20 @@ export class BrowserWindowController implements TabHost {
   }
 
   // ---- window plumbing ----
+
+  /** Recolors what's behind the browser UI for the theme (and, in Paper, the system's light or dark). */
+  applyChromeColors(): void {
+    if (this.win.isDestroyed()) return
+    const colors = chromeColors()
+    this.win.setBackgroundColor(colors.background)
+    if (!isMac) this.win.setTitleBarOverlay({ color: colors.bar, symbolColor: colors.symbols })
+  }
+
+  /** The browser UI, the overlay above the page, and loaded browserr:// pages: every page drawn in the theme. */
+  get themedContents(): WebContents[] {
+    const internal = this.tabs.filter((t) => t.isInternal).map((t) => t.liveWc)
+    return [this.win.webContents, this.overlay.webContents, ...internal].filter((wc): wc is WebContents => !!wc && !wc.isDestroyed())
+  }
 
   private wireWindow(): void {
     const chrome = this.win.webContents
@@ -390,6 +416,26 @@ export class BrowserWindowController implements TabHost {
     return tab
   }
 
+  /**
+   * Adds tabs brought over from another browser after the ones here, asleep until opened. Pages already open here
+   * are skipped. Returns how many were added.
+   */
+  importTabs(tabs: { url: string; title: string; pinned: boolean }[]): number {
+    const open = new Set(this.tabs.map((t) => pageKey(t.url)))
+    let added = 0
+    for (const t of tabs) {
+      const key = pageKey(t.url)
+      if (open.has(key)) continue
+      open.add(key)
+      // Until the page loads, its icon comes from the same service as favorites' icons.
+      const favicon = `https://www.google.com/s2/favicons?domain=${new URL(t.url).hostname}&sz=32`
+      const tab = this.createTab(t.url, { active: false, snapshot: { url: t.url, title: t.title, favicon } })
+      if (t.pinned) this.setPinned(tab, true)
+      added++
+    }
+    return added
+  }
+
   openTab(url: string, { active, opener }: { active: boolean; opener: Tab }): void {
     const tab = this.createTab(url, { active, index: this.tabs.indexOf(opener) + 1 })
     browserEvents.emit('tab-opened', tab, opener, url)
@@ -413,6 +459,7 @@ export class BrowserWindowController implements TabHost {
     this.win.webContents.send(IPC.findState, { open: false, matches: 0, activeMatch: 0 })
     this.scheduleState()
     void tab.sampleColor()
+    this.showPrompt()
   }
 
   activateById(id: number): void {
@@ -743,13 +790,15 @@ export class BrowserWindowController implements TabHost {
     if (this.overlayState.mode !== 'suggestions') return
     this.setOverlay({ mode: 'hidden' })
     this.detachOverlay()
+    this.showPrompt()
   }
 
   setOmniboxAnchor(anchor: OmniboxAnchor): void {
     this.omniboxAnchor = anchor
-    // An open picker follows the bar, as the window is resized.
+    // An open picker follows the bar, as the window is resized; so does a question under it.
     const state = this.overlayState
     if (state.mode === 'send' && state.anchor) this.setOverlay({ ...state, anchor })
+    if (state.mode === 'permission') this.placePrompt()
   }
 
   openSendPicker(draft: ShareDraft, more?: ShareDraft[]): void {
@@ -781,6 +830,49 @@ export class BrowserWindowController implements TabHost {
     this.setOverlay({ mode: 'hidden' })
     this.detachOverlay()
     if (wasSend) this.active?.wc.focus()
+    this.showPrompt()
+  }
+
+  // ---- the question under the address bar about what a site wants ----
+
+  /**
+   * Shows the active tab's question, if its page has one (see permission-prompts.ts), or hides the one showing.
+   * The address-bar dropdown, the send picker and a group's panel go first; the question comes back after them.
+   */
+  showPrompt(): void {
+    const wc = this.active?.liveWc
+    const prompt = wc ? currentPrompt(wc) : null
+    const mode = this.overlayState.mode
+    if (!prompt) {
+      if (mode !== 'permission') return
+      this.setOverlay({ mode: 'hidden' })
+      this.detachOverlay()
+      return
+    }
+    if (mode !== 'hidden' && mode !== 'permission') return
+    this.setOverlay({ mode: 'permission', prompt })
+    this.placePrompt()
+    if (!this.overlayAttached) this.attachOverlay()
+  }
+
+  /** How tall the overlay says the question is. */
+  setPromptHeight(height: number): void {
+    this.promptHeight = Math.max(60, Math.min(Math.round(height), 800))
+    if (this.overlayState.mode === 'permission') this.placePrompt()
+  }
+
+  /** Just below the toolbar, lined up with the address bar's start (its site icon), and inside the window. */
+  private placePrompt(): void {
+    const [width, height] = this.win.getContentSize()
+    const m = PERMISSION_PROMPT_MARGIN
+    const a = this.omniboxAnchor
+    const left = a ? a.left + a.before : this.insets.left + 8
+    this.overlay.setBounds({
+      x: Math.round(Math.max(0, Math.min(left - m, width - PERMISSION_PROMPT_WIDTH - m * 2))),
+      y: Math.round(Math.max(0, this.insets.top - m + 4)),
+      width: PERMISSION_PROMPT_WIDTH + m * 2,
+      height: Math.min(this.promptHeight + m * 2, height)
+    })
   }
 
   // ---- the panel of a collapsed group's tabs ----
@@ -841,6 +933,7 @@ export class BrowserWindowController implements TabHost {
     if (this.overlayState.mode !== 'group') return
     this.setOverlay({ mode: 'hidden' })
     this.detachOverlay()
+    this.showPrompt()
   }
 
   private forgetPeek(): void {

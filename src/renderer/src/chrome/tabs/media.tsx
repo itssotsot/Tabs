@@ -1,14 +1,8 @@
-import { Pause, Play, Volume2, VolumeX } from 'lucide-react'
+import { Mic, MicOff, MonitorUp, Pause, Play, Video, VideoOff, Volume2, VolumeX } from 'lucide-react'
 import { useState, type PointerEvent, type ReactNode } from 'react'
 import type { TabMedia, TabState } from '@shared/types'
-import { formatTimestamp } from '@shared/youtube'
+import { formatTimestamp, mediaPosition } from '@shared/media'
 import { cx } from '../../ui/util'
-
-/** Where the video is now, going on from the page's last report. */
-function positionOf(media: TabMedia): number {
-  const time = media.time + ((Date.now() - media.at) / 1000) * media.rate
-  return media.duration === null ? time : Math.min(time, media.duration)
-}
 
 /** The tab shows a progress bar, so it's drawn a little taller in lists (`has-media`). */
 export function hasMediaBar(tab: TabState): boolean {
@@ -16,11 +10,12 @@ export function hasMediaBar(tab: TabState): boolean {
 }
 
 /**
- * Mute for a tab that's playing sound (or muted). With `animated`, it stays in the page while there's
- * nothing to mute, shrunk away, so it can grow in and out (see .tab-audio.gone).
+ * Mute for a tab that's playing sound (or muted), or in a call: a call goes quiet between people talking, and
+ * its sound should be one click away all the same. With `animated`, it stays in the page while there's nothing
+ * to mute, shrunk away, so it can grow in and out (see .tab-audio.gone).
  */
 export function MuteButton({ tab, animated }: { tab: TabState; animated?: boolean }): ReactNode {
-  const shown = tab.audible || tab.muted
+  const shown = tab.audible || tab.muted || !!tab.call || !!tab.capture?.microphone
   if (!shown && !animated) return null
   return (
     <button
@@ -32,6 +27,60 @@ export function MuteButton({ tab, animated }: { tab: TabState; animated?: boolea
     >
       {tab.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
     </button>
+  )
+}
+
+/**
+ * Which of your devices the tab is using: its camera, microphone or screen. The call buttons already show the
+ * camera and microphone they switch. The address bar's sign has the way to stop them.
+ */
+export function CaptureSigns({ tab }: { tab: TabState }): ReactNode {
+  const { capture, call } = tab
+  if (!capture) return null
+  const camera = capture.camera && (call?.camera ?? null) === null
+  const microphone = capture.microphone && (call?.mic ?? null) === null
+  if (!camera && !microphone && !capture.screen) return null
+  const using = [camera && 'camera', microphone && 'microphone', capture.screen && 'screen'].filter(Boolean).join(' and ')
+  return (
+    <span className="tab-capture" title={`Using your ${using}`}>
+      {camera && <Video size={12} />}
+      {microphone && <Mic size={12} />}
+      {capture.screen && <MonitorUp size={12} />}
+    </span>
+  )
+}
+
+/**
+ * Mic and camera for the tab's call, to mute yourself from any tab. With the call's own controls (Meet), the call
+ * shows you muted; otherwise Tabs mutes the device itself, and the site doesn't know. `micOnly` for pinned tabs.
+ */
+export function CallButtons({ tab, micOnly }: { tab: TabState; micOnly?: boolean }): ReactNode {
+  const { call } = tab
+  if (!call) return null
+  const quietly = call.by === 'tabs' ? " (the site won't show it)" : ''
+  return (
+    <>
+      {call.mic !== null && (
+        <button
+          className={cx('tab-call', !call.mic && 'off')}
+          title={(call.mic ? 'Mute microphone' : 'Unmute microphone') + quietly}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => window.browserr.tabs.call(tab.id, 'mic')}
+        >
+          {call.mic ? <Mic size={13} /> : <MicOff size={13} />}
+        </button>
+      )}
+      {!micOnly && call.camera !== null && (
+        <button
+          className={cx('tab-call', !call.camera && 'off')}
+          title={(call.camera ? 'Turn off camera' : 'Turn on camera') + quietly}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => window.browserr.tabs.call(tab.id, 'camera')}
+        >
+          {call.camera ? <Video size={13} /> : <VideoOff size={13} />}
+        </button>
+      )}
+    </>
   )
 }
 
@@ -124,7 +173,7 @@ export function MediaProgress({ tab }: { tab: TabState }): ReactNode {
 /** The played part, moved along by a CSS animation so the strip doesn't re-render while the video plays. */
 function MediaFill({ media, duration }: { media: TabMedia; duration: number }): ReactNode {
   // Worked out once: the animation carries on from here, and each new report remounts this.
-  const [start] = useState(() => positionOf(media))
+  const [start] = useState(() => mediaPosition(media))
   const rate = media.rate || 1
   return (
     <div

@@ -8,6 +8,12 @@
   --intro-on: #fff;
   /* A mid-tone tinted by the palette, rather than near-black. */
   --intro-bg: color-mix(in oklab, var(--intro-a) 16%, #24242c);
+  /* The intro looks the same in every theme: Default's text, status colors and font. */
+  --text: #ececef;
+  --ok: #4ade80;
+  --danger: #f87171;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif;
+  font-size-adjust: none;
   /* The app's greys are made for a darker background; on this one they need to be lighter. */
   --text-muted: rgb(255 255 255 / 0.74);
   --text-faint: rgb(255 255 255 / 0.52);
@@ -21,6 +27,7 @@
   align-items: center;
   overflow: hidden;
   background: var(--intro-bg);
+  color: var(--text);
   /* The whole backdrop moves the window, like a title bar; the card doesn't. */
   -webkit-app-region: drag;
 }

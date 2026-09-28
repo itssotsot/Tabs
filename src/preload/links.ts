@@ -1,6 +1,6 @@
 import { ipcRenderer } from 'electron'
 import { IPC } from '@shared/api'
-import { pageKey } from '@shared/url'
+import { pageKey } from '@shared/links'
 
 /** Asks the browser to open `url` in a new tab, which it does if this tab shows a chat's link. */
 function openedInNewTab(url: string): boolean {

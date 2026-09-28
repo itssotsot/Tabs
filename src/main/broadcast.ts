@@ -1,3 +1,4 @@
+import { nativeTheme } from 'electron'
 import { IPC } from '@shared/api'
 import { setAdblockEnabled } from './adblock'
 import { webSession } from './env'
@@ -37,4 +38,22 @@ export function settingsChanged(): void {
   buildAppMenu()
   for (const c of BrowserWindowController.all) c.regroup()
   broadcast(IPC.settingsChanged, store.settings)
+  themeChanged()
+}
+
+/** Redraws every window in the current theme. */
+function themeChanged(): void {
+  for (const c of BrowserWindowController.all) {
+    c.applyChromeColors()
+    for (const wc of c.themedContents) wc.send(IPC.themeChanged, store.settings.theme)
+    // Back in a theme that follows the page: the toolbar needs the page's colors now, not at the next sample.
+    void c.activeTab?.sampleColor()
+  }
+}
+
+/** Paper is light or dark with the system; the pages follow by themselves, the windows' own colors don't. */
+export function followSystemAppearance(): void {
+  nativeTheme.on('updated', () => {
+    for (const c of BrowserWindowController.all) c.applyChromeColors()
+  })
 }

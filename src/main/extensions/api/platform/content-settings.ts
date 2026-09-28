@@ -1,4 +1,5 @@
 import type { Session, WebContents, WebFrameMain } from 'electron'
+import type { SitePermission } from '@shared/types'
 import { store } from '../../../store'
 import { addBlockingHandler, removeHandler } from '../../../web-request-hub'
 import { hasApiPermission, loadedExtension } from '../../access'
@@ -23,7 +24,7 @@ interface TypeInfo {
   allowed: ContentSettingValue[]
   default: ContentSettingValue
   /** The site permission (src/main/permissions.ts) the user's own choice is stored under. */
-  sitePermission?: string
+  sitePermission?: SitePermission
   /** Deprecated in Chrome: always reports the default, ignores set and clear. */
   fixed?: boolean
 }
@@ -37,8 +38,8 @@ const TYPES: Record<string, TypeInfo> = {
   // Tabs doesn't block popups.
   popups: { allowed: ['allow', 'block'], default: 'allow' },
   notifications: { allowed: ['allow', 'block', 'ask'], default: 'ask', sitePermission: 'notifications' },
-  microphone: { allowed: ['allow', 'block', 'ask'], default: 'ask', sitePermission: 'media' },
-  camera: { allowed: ['allow', 'block', 'ask'], default: 'ask', sitePermission: 'media' },
+  microphone: { allowed: ['allow', 'block', 'ask'], default: 'ask', sitePermission: 'microphone' },
+  camera: { allowed: ['allow', 'block', 'ask'], default: 'ask', sitePermission: 'camera' },
   unsandboxedPlugins: { allowed: ['allow', 'block', 'ask'], default: 'block' },
   automaticDownloads: { allowed: ['allow', 'block', 'ask'], default: 'ask' },
   autoVerify: { allowed: ['allow', 'block'], default: 'allow' },

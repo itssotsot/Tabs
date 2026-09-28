@@ -19,6 +19,10 @@ export interface TabState {
   muted: boolean
   /** The page's video, on sites whose player the tab can control (YouTube). Null when nothing has played. */
   media: TabMedia | null
+  /** The call the page is in (Google Meet), for the tab's mic and camera buttons. Null when there's none. */
+  call: TabCall | null
+  /** Which of your devices the page is using right now; null when none. */
+  capture: TabCapture | null
   pinned: boolean
   zoomPercent: number
   secure: boolean
@@ -51,6 +55,85 @@ export interface TabMedia {
 }
 
 export type MediaCommand = { type: 'toggle' } | { type: 'seek'; time: number }
+
+/** Whether a call is sending your microphone and camera: true when on, null when the call has no such button. */
+export interface CallState {
+  mic: boolean | null
+  camera: boolean | null
+}
+
+/**
+ * A tab's call, for its mic and camera buttons. `by` says who mutes: `site`, the call's own buttons (the call shows
+ * you muted); or `tabs`, Tabs itself, for sites it can't press the buttons of (the call hears silence, or sees black,
+ * but doesn't know).
+ */
+export interface TabCall extends CallState {
+  by: 'site' | 'tabs'
+}
+
+export type CallDevice = 'mic' | 'camera'
+
+/** Which of your devices a page is using: the camera or microphone it opened, or a screen it's sharing. */
+export interface TabCapture {
+  camera: boolean
+  microphone: boolean
+  screen: boolean
+}
+
+export type CaptureDevice = keyof TabCapture
+
+/** What a site can be allowed to do, as Tabs asks and remembers it (SITE_PERMISSIONS has their names). */
+export type SitePermission =
+  | 'camera'
+  | 'microphone'
+  | 'display-capture'
+  | 'geolocation'
+  | 'notifications'
+  | 'clipboard-read'
+  | 'midi'
+  | 'midiSysex'
+  | 'idle-detection'
+  | 'openExternal'
+
+export type PermissionDecision = 'allow' | 'deny'
+
+/** How a permission looks to a page, as the Permissions API says it: `prompt` while you'd be asked. */
+export type PageSitePermissionState = 'granted' | 'denied' | 'prompt'
+
+/** A site's saved choices. */
+export interface SiteAccess {
+  origin: string
+  permissions: Partial<Record<SitePermission, PermissionDecision>>
+}
+
+/** Your camera, microphone and speakers, by name (sites see different ids for them). Null: the system's default. */
+export interface DeviceChoice {
+  camera: string | null
+  microphone: string | null
+  speaker: string | null
+}
+
+/** A question under the address bar about what a site wants. */
+export type PermissionPrompt =
+  | {
+      kind: 'ask'
+      id: number
+      host: string
+      permissions: SitePermission[]
+      devices: DeviceChoice
+      /** The devices it can show you (a camera picture, a microphone level) while asking. */
+      preview: ('camera' | 'microphone')[]
+    }
+  /** macOS isn't letting Tabs use the camera or microphone a site asked for. */
+  | { kind: 'system'; id: number; host: string; blocked: ('camera' | 'microphone')[] }
+
+/**
+ * The answer to a PermissionPrompt. `once` allows until the page is left, `always` remembers it. `dismiss` (closing it,
+ * or the system prompt's "not now") allows nothing and remembers nothing.
+ */
+export type PermissionAnswer =
+  | { id: number; decision: 'once' | 'always' | 'block' | 'dismiss'; devices?: DeviceChoice }
+  | { id: number; decision: 'open-system-settings' }
 
 /** The colors along the top of a tab's page, as in its `TabState`. */
 export interface PageEdge {
@@ -140,6 +223,8 @@ export type OverlayState =
    * picker grows out of; null when it isn't on screen.
    */
   | { mode: 'send'; draft: ShareDraft; more?: ShareDraft[]; anchor: OmniboxAnchor | null; windowWidth: number }
+  /** What a site wants, asked under the address bar. */
+  | { mode: 'permission'; prompt: PermissionPrompt }
   /** A collapsed site group's tabs, shown while you hover its chip. */
   | { mode: 'group'; group: string; name: string; color: string; tabs: TabState[]; activeTabId: number | null }
 
@@ -184,7 +269,7 @@ export type ChromeCommand =
   | { type: 'open-extension-popup'; extensionId: string }
   | { type: 'open-extension-panel'; panel: ExtensionPanelInfo }
   | { type: 'close-extension-panel' }
-  /** Show the welcome intro again, at the import step (File › Import Bookmarks and History). */
+  /** Show the welcome intro again, at the import step (File › Import from Another Browser). */
   | { type: 'show-import' }
   /** The intro was finished in some window, so every window closes it. */
   | { type: 'intro-finished' }
@@ -220,9 +305,12 @@ export type SearchEngine = 'google' | 'duckduckgo' | 'bing' | 'brave'
 /** How tabs, links from chats, and favorites are laid out. */
 export type TabLayout = 'vertical' | 'groups'
 
+/** How the browser UI looks. Paper follows the system's light or dark appearance. */
+export type ThemeId = 'default' | 'paper'
 
 export interface Settings {
   searchEngine: SearchEngine
+  theme: ThemeId
   adblock: boolean
   notifications: boolean
   restoreSession: boolean
@@ -237,6 +325,10 @@ export interface Settings {
   showTabAge: boolean
   /** Mark each tab in a group with a line in the group's color. */
   showGroupLines: boolean
+  /** Permissions sites aren't asked for, only blocked, unless a site was allowed before. */
+  blockedPermissions: SitePermission[]
+  /** The camera, microphone and speakers sites use. */
+  devices: DeviceChoice
 }
 
 /** A browser (profile) on this computer that bookmarks and history can be imported from. */
@@ -252,20 +344,24 @@ export interface ImportSource {
   needsAccess: boolean
 }
 
-/** Favorites come from the other browser's bookmarks bar. */
+/** Favorites come from the other browser's bookmarks bar; tabs are the ones it has open. */
 export interface ImportCounts {
   favorites: number
   history: number
+  tabs: number
 }
 
 export interface ImportPreview extends ImportCounts {
   /** Bookmarks on the bar that aren't favorites yet. Only the first `favorites` of them come over. */
   favoritesFound: number
+  /** Open tabs (each page once). Only the first `tabs` of them come over. */
+  tabsFound: number
 }
 
 export interface ImportChoice {
   favorites: boolean
   history: boolean
+  tabs: boolean
 }
 
 export interface GoogleCredential {

@@ -3,7 +3,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 import { REACTIONS } from '@shared/constants'
 import type { ShareDraft } from '@shared/types'
 import { findLinks, hostOf, prettyUrl, URL_RE } from '@shared/url'
-import { formatTimestamp } from '@shared/youtube'
+import { formatTimestamp } from '@shared/media'
 import {
   cancelInvite,
   deleteMessage,

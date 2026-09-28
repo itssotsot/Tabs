@@ -1,0 +1,26 @@
+/* Default on browserr:// pages (new tab, settings…): darker than the browser UI, and light with a light system. */
+
+[data-theme='default'] {
+  --bg: #0f0f11;
+  --bg-raised: #18181b;
+  --bg-input: #202024;
+  --bg-hover: rgb(255 255 255 / 0.06);
+  --border: #27272a;
+  --text: #f4f4f5;
+  --text-muted: #a1a1aa;
+  --text-faint: #71717a;
+}
+
+@media (prefers-color-scheme: light) {
+  [data-theme='default'] {
+    color-scheme: light;
+    --bg: #f6f6f7;
+    --bg-raised: #ffffff;
+    --bg-input: #ffffff;
+    --bg-hover: rgb(0 0 0 / 0.04);
+    --border: #e4e4e7;
+    --text: #18181b;
+    --text-muted: #52525b;
+    --text-faint: #a1a1aa;
+  }
+}

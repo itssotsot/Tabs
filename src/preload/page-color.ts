@@ -1,5 +1,6 @@
 import { ipcRenderer } from 'electron'
 import { IPC } from '@shared/api'
+import { oncePerFrame } from './frame'
 
 /** How far down from the top an element can start and still count as the top of the page (what the browser reads). */
 const TOP_BAND = 16
@@ -24,17 +25,7 @@ export function installPageColorHints(): void {
 
   // At most once a frame while scrolling, and once more where it stops. Sent a frame late, so the frame
   // with the new scroll position is on screen by the time the browser reads it.
-  let queued = false
-  const soon = (): void => {
-    if (queued) return
-    queued = true
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        queued = false
-        hint()
-      })
-    )
-  }
+  const soon = oncePerFrame(hint, { late: true })
   // Capturing, so scrolling inside a page's own scroll area (common in web apps) counts too.
   addEventListener('scroll', soon, { capture: true, passive: true })
   addEventListener('scrollend', soon, { capture: true, passive: true })

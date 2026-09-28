@@ -1,6 +1,6 @@
 import { app, BrowserWindow, components, type WebContents } from 'electron'
 import { setAdblockEnabled } from './adblock'
-import { broadcast } from './broadcast'
+import { broadcast, followSystemAppearance } from './broadcast'
 import { setupDownloads } from './downloads'
 import { profile, registerInternalProtocol, registerSchemes, webSession } from './env'
 import { setupExtensions } from './extensions'
@@ -15,6 +15,7 @@ import { setupUpdates } from './updater'
 import { setupWebRequestHub } from './web-request-hub'
 import { BrowserWindowController, controllerFor, focusedController, freezeSession } from './window'
 import { IPC } from '@shared/api'
+import { isInternalUrl } from '@shared/url'
 import { existsSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -40,6 +41,10 @@ registerSchemes()
 if (!app.isPackaged && process.env.BROWSERR_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.BROWSERR_DEBUG_PORT)
 }
+
+// Windows plays videos on a hardware overlay while nothing covers them. Each time a site's controls show or hide
+// over one, or it scrolls, Chromium moves it on or off the overlay, and it flashes dark.
+if (process.platform === 'win32') app.commandLine.appendSwitch('disable-direct-composition-video-overlays')
 
 // If the terminal that launched us goes away, logging must not crash the app (EIO/EPIPE).
 for (const stream of [process.stdout, process.stderr]) stream.on('error', () => {})
@@ -124,7 +129,11 @@ app.whenReady().then(async () => {
   setupBrowserIdentity(ses)
 
   registerInternalProtocol()
-  setupPermissions(ses, windowFor)
+  setupPermissions(ses, {
+    windowFor,
+    isTab: (wc) => !!controllerFor(wc)?.tabFor(wc),
+    isOwn: (wc) => !!controllerFor(wc)?.isChrome(wc) || isInternalUrl(wc.getURL())
+  })
   setupDownloads(ses, (list) => broadcast(IPC.downloadsChanged, list))
   void setAdblockEnabled(ses, store.settings.adblock)
   setupPredictor(ses)
@@ -133,6 +142,7 @@ app.whenReady().then(async () => {
 
   registerIpc()
   buildAppMenu()
+  followSystemAppearance()
   setupUpdates((update) => broadcast(IPC.updateChanged, update))
 
   ready = true

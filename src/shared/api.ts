@@ -13,14 +13,20 @@ import type {
   ImportPreview,
   ImportSource,
   Insets,
+  CallDevice,
+  CaptureDevice,
   MediaCommand,
   OmniboxAnchor,
   OverlayState,
+  PermissionAnswer,
+  PermissionDecision,
   PageEdge,
   Rect,
   Settings,
   ShareDraft,
   SidebarPanel,
+  SiteAccess,
+  SitePermission,
   Suggestion,
   ToolbarExtension,
   UpdateReady,
@@ -40,6 +46,8 @@ export const IPC = {
   tabContextMenu: 'tab:context-menu',
   tabToggleMute: 'tab:toggle-mute',
   tabMedia: 'tab:media',
+  tabCall: 'tab:call',
+  tabStopCapture: 'tab:stop-capture',
   navigate: 'nav:navigate',
   navBack: 'nav:back',
   navForward: 'nav:forward',
@@ -48,8 +56,8 @@ export const IPC = {
   zoomReset: 'nav:zoom-reset',
   setInsets: 'chrome:set-insets',
   siteInfoMenu: 'chrome:site-info-menu',
+  captureMenu: 'chrome:capture-menu',
   appMenu: 'chrome:app-menu',
-  tabLayoutMenu: 'chrome:tab-layout-menu',
   showMenu: 'chrome:show-menu',
   pasteAndGo: 'nav:paste-and-go',
   shareOpenPickerForLink: 'share:open-picker-for-link',
@@ -65,6 +73,8 @@ export const IPC = {
   bookmarkOpen: 'bookmark:open',
   bookmarkContextMenu: 'bookmark:context-menu',
   settingsGet: 'settings:get',
+  /** Sync: the theme, so a page can be drawn in it from the start. */
+  themeGet: 'theme:get',
   settingsSet: 'settings:set',
   downloadsList: 'downloads:list',
   downloadAction: 'downloads:action',
@@ -97,6 +107,8 @@ export const IPC = {
   omniboxPick: 'omnibox:pick',
   bookmarksChanged: 'bookmarks:changed',
   settingsChanged: 'settings:changed',
+  /** To the browser UI, the overlay and browserr:// pages. */
+  themeChanged: 'theme:changed',
   downloadsChanged: 'downloads:changed',
   updateChanged: 'update:changed',
   extensionsToolbar: 'extensions:toolbar',
@@ -107,18 +119,32 @@ export const IPC = {
   overlayClose: 'overlay:close',
   overlayPeekHover: 'overlay:peek-hover',
   overlayOpenPanel: 'overlay:open-panel',
+  overlayPermissionAnswer: 'overlay:permission-answer',
+  overlayPromptHeight: 'overlay:prompt-height',
 
   // web pages -> main
-  pageShare: 'page:share',
-  pageAdblockEnabled: 'page:adblock-enabled',
+  /** sendSync(url) -> PageAdblock | null (null when ad blocking is off). */
+  pageAdblock: 'page:adblock',
   pageHoldMedia: 'page:hold-media',
   pageLeaveSharedLink: 'page:leave-shared-link',
   pageMediaState: 'page:media-state',
+  pageCallState: 'page:call-state',
+  pageCapture: 'page:capture',
+  /** invoke() -> DeviceChoice: your devices, for the page's camera, microphone and speakers. */
+  pageDevices: 'page:devices',
+  /** invoke() -> Record<SitePermission, PageSitePermissionState>, for the page's origin. */
+  pagePermissionStates: 'page:permission-states',
   pageRepainted: 'page:repainted',
 
   // main -> web pages
   pageReleaseMedia: 'page:release-media',
   pageMediaCommand: 'page:media-command',
+  pageCallCommand: 'page:call-command',
+  pageCaptureStop: 'page:capture-stop',
+  /** (device, off): Tabs' own mute, for calls it can't press the buttons of (see Tab.call). */
+  pageCaptureSilence: 'page:capture-silence',
+  /** You decided something for the page's site: its preload asks for the permission states again. */
+  pagePermissionsChanged: 'page:permissions-changed',
 
   // internal pages -> main
   internalHistory: 'internal:history',
@@ -139,7 +165,10 @@ export const IPC = {
   internalExtensionOptions: 'internal:extension-options',
   internalOpenWebStore: 'internal:open-web-store',
   internalExtensionSetPinned: 'internal:extension-set-pinned',
-  internalOpenImport: 'internal:open-import'
+  internalOpenImport: 'internal:open-import',
+  internalSiteAccess: 'internal:site-access',
+  internalSetSitePermission: 'internal:set-site-permission',
+  internalForgetSite: 'internal:forget-site'
 } as const
 
 /** Roles the browser UI may put in its own menus; they act on whatever is focused. */
@@ -155,6 +184,12 @@ export interface MenuSpec {
   checked?: boolean
   enabled?: boolean
   submenu?: MenuSpec[]
+}
+
+/** What a page's preload needs to block ads, when blocking is on. */
+export interface PageAdblock {
+  /** The filter lists' scriptlets for the page, to run before its own scripts. Null if there are none, or the lists are still loading. */
+  scriptlets: string | null
 }
 
 export type DownloadAction = 'open' | 'show' | 'cancel' | 'pause' | 'resume' | 'remove' | 'clear'
@@ -182,6 +217,10 @@ export interface BrowserrAPI {
     toggleMute(id: number): void
     /** Plays, pauses or seeks the tab's video (see TabState.media). */
     media(id: number, command: MediaCommand): void
+    /** Turns the mic or camera of the tab's call on or off (see TabState.call). */
+    call(id: number, device: CallDevice): void
+    /** Stops the tab using your camera, microphone or screen (see TabState.capture). */
+    stopCapture(id: number, device: CaptureDevice): void
   }
   nav: {
     go(input: string): void
@@ -199,9 +238,9 @@ export interface BrowserrAPI {
   onCommand(cb: (cmd: ChromeCommand) => void): Unsubscribe
   setInsets(insets: Insets): void
   siteInfoMenu(): void
+  /** The menu of the address bar's camera, microphone and screen sign, for the active tab. */
+  captureMenu(): void
   appMenu(x: number, y: number): void
-  /** The menu for picking a tab layout, opened below (x, y). */
-  tabLayoutMenu(x: number, y: number): void
   /** Shows a native right-click menu at the pointer. Resolves with the clicked item's id, or null. */
   showMenu(items: MenuSpec[]): Promise<string | null>
   omnibox: {
@@ -292,6 +331,9 @@ export interface BrowserrAPI {
     openPanel(panel: SidebarPanel): void
     /** The pointer went onto (or off) the group panel. */
     peekHover(inside: boolean): void
+    answerPermission(answer: PermissionAnswer): void
+    /** How tall the question under the address bar is, so the overlay is just that. */
+    promptHeight(height: number): void
   }
 }
 
@@ -320,6 +362,11 @@ export interface InternalAPI {
   setExtensionPinned(id: string, pinned: boolean): Promise<ExtensionInfo[]>
   /** Opens the import step of the welcome intro in this window. */
   openImport(): Promise<void>
+  /** Every site with saved choices. */
+  siteAccess(): Promise<SiteAccess[]>
+  /** Null forgets the choice, so the site is asked again. */
+  setSitePermission(origin: string, permission: SitePermission, decision: PermissionDecision | null): Promise<SiteAccess[]>
+  forgetSite(origin: string): Promise<SiteAccess[]>
 }
 
 export type { ShareDraft }

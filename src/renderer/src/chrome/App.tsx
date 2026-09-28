@@ -12,8 +12,10 @@ import type {
   UpdateReady,
   WindowState
 } from '@shared/types'
+import { themeInfo } from '@shared/constants'
 import { cx } from '../ui/util'
 import { FindBar } from './FindBar'
+import { WhatsNew } from './WhatsNew'
 import { Intro, type IntroMode } from './intro/Intro'
 import { Sidebar } from './Sidebar'
 import { GroupsStrip } from './tabs/GroupsStrip'
@@ -73,6 +75,8 @@ export function App(): ReactNode {
   const sidebarRef = useRef<HTMLElement>(null)
   const tabsRef = useRef<HTMLElement>(null)
   const layout: TabLayout = settings?.tabLayout ?? 'vertical'
+  // Until settings arrive, the theme the preload put on the page.
+  const followsPage = themeInfo(settings?.theme ?? document.documentElement.dataset.theme).followsPageColor
 
   useEffect(() => {
     const offs = [
@@ -163,12 +167,14 @@ export function App(): ReactNode {
   // The toolbar extends the top of the page upward, so it reads as part of the site. While you scroll,
   // the colors change many times a second, so they come on their own and go straight onto the header, without
   // re-rendering the browser UI. The tab's state has them too, for when you switch tabs.
+  // Only in themes that follow the page's color; the others keep their own.
   const activeTab = state.tabs.find((t) => t.id === activeTabId)
   const liveEdge = useRef<PageEdge | null>(null)
   const paintEdge = useRef<() => void>(() => {})
   paintEdge.current = () => {
     const header = headerRef.current
     if (!header) return
+    if (!followsPage) return applyPageEdge(header, null, null, 0)
     const live = liveEdge.current?.tabId === activeTabId ? liveEdge.current : null
     const color = live?.color ?? activeTab?.color ?? null
     applyPageEdge(header, color, live?.edge ?? activeTab?.edge ?? null, sidebarWidth)
@@ -176,7 +182,7 @@ export function App(): ReactNode {
   useLayoutEffect(() => {
     liveEdge.current = null
   }, [activeTabId])
-  useLayoutEffect(() => paintEdge.current(), [activeTabId, activeTab?.color, activeTab?.edge, sidebarWidth])
+  useLayoutEffect(() => paintEdge.current(), [activeTabId, activeTab?.color, activeTab?.edge, sidebarWidth, followsPage])
   useEffect(
     () =>
       api.onPageEdge((edge) => {
@@ -199,7 +205,7 @@ export function App(): ReactNode {
 
   return (
     <LinksProvider tabs={state.tabs} bookmarks={bookmarks}>
-      <div className={cx('chrome', `layout-${layout}`, settings?.showTabAge && 'show-tab-age', settings?.showGroupLines && 'show-group-lines')}>
+      <div className={cx('chrome', `layout-${layout}`, settings?.showTabAge && 'show-tab-age', settings?.showGroupLines && 'show-group-lines', followsPage && 'follows-page')}>
         {layout === 'vertical' && <VerticalTabs ref={tabsRef} state={state} layout={layout} onOpenRoom={openRoom} />}
         <div className="chrome-main">
           <header ref={headerRef} className="chrome-header">
@@ -215,6 +221,7 @@ export function App(): ReactNode {
             {findOpen && (
               <FindBar result={find} focusToken={findFocus} nextRequest={findNext} onClose={() => setFindOpen(false)} />
             )}
+            <WhatsNew hidden={!!intro} />
           </header>
           <div className="chrome-body">
             {overview ? <Overview state={state} onClose={() => setOverview(false)} /> : <div className="viewport" />}

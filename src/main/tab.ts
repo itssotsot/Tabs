@@ -1,6 +1,8 @@
 import {
   dialog,
+  webFrameMain,
   WebContentsView,
+  type WebFrameMain,
   type BrowserWindow,
   type ContextMenuParams,
   type Input,
@@ -10,8 +12,11 @@ import {
   type WebContents
 } from 'electron'
 import { IPC } from '@shared/api'
-import type { MediaCommand, TabLink, TabMedia, TabState } from '@shared/types'
-import { INTERNAL_SCHEME, isInternalUrl, NEW_TAB_URL, pageKey, prettyUrl } from '@shared/url'
+import { themeInfo } from '@shared/constants'
+import type { CallDevice, CallState, CaptureDevice, MediaCommand, TabCall, TabCapture, TabLink, TabMedia, TabState } from '@shared/types'
+import { pageKey } from '@shared/links'
+import { mediaPosition } from '@shared/media'
+import { INTERNAL_SCHEME, isInternalUrl, NEW_TAB_URL, prettyUrl } from '@shared/url'
 import { tabPreload, webSession } from './env'
 import { browserEvents } from './browser-events'
 import { extensionHooks } from './extension-hooks'
@@ -58,14 +63,10 @@ const MIN_SAMPLE_GAP_MS = 16
 const CAPTURE_TIMEOUT_MS = 500
 /** How long after the last scroll the page's top colors are read again. */
 const SCROLL_SETTLE_MS = [80, 400]
+/** How long a background tab in a call gets to draw after its mic or camera button is used (see controlCall). */
+const CALL_DRAW_MS = 1500
 /** After a page first paints, when to read its top color again, as its header finishes drawing. */
 const FOLLOW_UP_SAMPLES_MS = [200, 600, 1500]
-
-/**
- * Windows draws videos on a hardware overlay, and a capture takes them off it for a frame: the video flashes dark.
- * So there, the page's colors aren't read while it has a video, and the toolbar keeps the last ones.
- */
-const CAPTURE_FLASHES_VIDEO = process.platform === 'win32'
 
 /** Whether two #rrggbb colors look the same. Pages that fade their background shouldn't redraw the toolbar every frame. */
 function sameColor(a: string, b: string | null): boolean {
@@ -188,8 +189,13 @@ export class Tab implements Groupable {
   private newTabPage: string | null = null
   /** The page's video, as its preload last reported it. */
   private media: TabMedia | null = null
-  /** Something on the page has played since it loaded; its video may still be showing, even paused. */
-  private playedMedia = false
+  /** The page's call, from its own controls, as its preload last reported it (see call-controls.ts). */
+  private siteCall: CallState | null = null
+  /** Tabs' own mute, for a call whose controls it can't use (see `call`). */
+  private silenced = { mic: false, camera: false }
+  private callDrawTimer: ReturnType<typeof setTimeout> | undefined
+  /** What each of the page's frames reported using, by `${processId}:${frameId}` (a call can be in an iframe). */
+  private captures = new Map<string, TabCapture>()
   /** The top of the page, which the toolbar extends: its main color, and its colors left to right. */
   private pageColor: string | null = null
   private pageEdge: string[] | null = null
@@ -310,6 +316,8 @@ export class Tab implements Groupable {
       audible: this.audible,
       muted: this.muted,
       media: wc ? this.media : null,
+      call: wc ? this.call : null,
+      capture: wc ? this.capture : null,
       pinned: this.pinned,
       zoomPercent: wc ? Math.round(wc.getZoomFactor() * 100) : 100,
       // Extension pages come from the extension's own files, like browserr:// pages.
@@ -341,12 +349,13 @@ export class Tab implements Groupable {
 
   /**
    * Reads the colors along the top of the page, for the toolbar to extend upward.
-   * Only works while the tab is on screen, so the window calls it for its active tab.
+   * Only works while the tab is on screen, so the window calls it for its active tab. Themes that keep their own
+   * toolbar color don't need it.
    */
   async sampleColor(): Promise<void> {
+    if (!themeInfo(store.settings.theme).followsPageColor) return
     const wc = this.liveWc
     if (!wc || wc.isDestroyed() || !this.painted) return
-    if (CAPTURE_FLASHES_VIDEO && this.playedMedia) return
     if (this.sampling) return void (this.resample = true)
     const wait = this.lastSampleAt + MIN_SAMPLE_GAP_MS - Date.now()
     if (wait > 0) {
@@ -468,7 +477,9 @@ export class Tab implements Groupable {
     this.failedUrl = null
     this.frozen = false
     this.media = null
-    this.playedMedia = false
+    this.siteCall = null
+    this.silenced = { mic: false, camera: false }
+    this.captures.clear()
     wc.close()
     this.host.onTabUpdated(this)
     return true
@@ -545,6 +556,11 @@ export class Tab implements Groupable {
     this.host.onTabUpdated(this)
   }
 
+  /** Seconds into the page's player now, or null when it has none playing. */
+  get mediaPosition(): number | null {
+    return this.media ? Math.floor(mediaPosition(this.media)) : null
+  }
+
   /** What the page's player reported: its video's state, or null when there's none. */
   setMedia(media: TabMedia | null): void {
     this.media = media
@@ -556,6 +572,90 @@ export class Tab implements Groupable {
     // A paused video's tab may have been frozen to save power.
     await this.thaw()
     this.liveWc?.send(IPC.pageMediaCommand, command)
+  }
+
+  /** The page is in a call (Google Meet), or using your camera, microphone or screen. */
+  get inCall(): boolean {
+    return !!this.siteCall || !!this.capture
+  }
+
+  /**
+   * The tab's call, for its mic and camera buttons: from the call's own controls when the page has them, else
+   * Tabs' own mute for the microphone and camera the page is using (the page gets silence, or black, but doesn't know).
+   */
+  get call(): TabCall | null {
+    if (this.siteCall) return { ...this.siteCall, by: 'site' }
+    const capture = this.capture
+    if (!capture?.microphone && !capture?.camera) return null
+    return { mic: capture.microphone ? !this.silenced.mic : null, camera: capture.camera ? !this.silenced.camera : null, by: 'tabs' }
+  }
+
+  /** Which of your devices the page's frames are using; null when none. */
+  get capture(): TabCapture | null {
+    const all: TabCapture = { camera: false, microphone: false, screen: false }
+    for (const [key, capture] of this.captures) {
+      const [processId, frameId] = key.split(':').map(Number)
+      // An iframe that's gone took its devices along.
+      const frame = webFrameMain.fromId(processId, frameId)
+      if (!frame || frame.detached) {
+        this.captures.delete(key)
+        continue
+      }
+      for (const device of ['camera', 'microphone', 'screen'] as const) all[device] ||= capture[device]
+    }
+    return all.camera || all.microphone || all.screen ? all : null
+  }
+
+  /** What one of the page's frames reported using. */
+  setCapture(processId: number, frameId: number, capture: TabCapture): void {
+    const key = `${processId}:${frameId}`
+    if (capture.camera || capture.microphone || capture.screen) this.captures.set(key, capture)
+    else if (!this.captures.delete(key)) return
+    // A frame that starts using a device Tabs has muted gets it muted too.
+    const frame = webFrameMain.fromId(processId, frameId)
+    if (this.silenced.mic && capture.microphone) frame?.send(IPC.pageCaptureSilence, 'microphone', true)
+    if (this.silenced.camera && capture.camera) frame?.send(IPC.pageCaptureSilence, 'camera', true)
+    this.host.onTabUpdated(this)
+  }
+
+  /** The page's frames using a device. */
+  private framesUsing(device: CaptureDevice): WebFrameMain[] {
+    return [...this.captures]
+      .filter(([, capture]) => capture[device])
+      .flatMap(([key]) => {
+        const [processId, frameId] = key.split(':').map(Number)
+        return webFrameMain.fromId(processId, frameId) ?? []
+      })
+  }
+
+  /** Stops the page using a device, in every frame that uses it. */
+  stopCapture(device: CaptureDevice): void {
+    for (const frame of this.framesUsing(device)) frame.send(IPC.pageCaptureStop, device)
+  }
+
+  /** What the page's call reported from its own controls: its mic and camera, or null when it's not in one. */
+  setCall(call: CallState | null): void {
+    this.siteCall = call
+    this.host.onTabUpdated(this)
+  }
+
+  controlCall(device: CallDevice): void {
+    const wc = this.liveWc
+    const call = this.call
+    if (!call || call[device] === null || !wc) return
+    if (call.by === 'tabs') {
+      this.silenced[device] = !this.silenced[device]
+      const captured = device === 'mic' ? 'microphone' : 'camera'
+      for (const frame of this.framesUsing(captured)) frame.send(IPC.pageCaptureSilence, captured, this.silenced[device])
+      this.host.onTabUpdated(this)
+      return
+    }
+    // A background tab draws nothing, and Meet only shows the change (which the tab's buttons read) once it
+    // draws. So it gets to draw for a moment; for longer, it would act as if on screen and use more.
+    wc.setBackgroundThrottling(false)
+    clearTimeout(this.callDrawTimer)
+    this.callDrawTimer = setTimeout(() => !wc.isDestroyed() && wc.setBackgroundThrottling(true), CALL_DRAW_MS)
+    wc.send(IPC.pageCallCommand, device)
   }
 
   toggleDevTools(): void {
@@ -607,13 +707,19 @@ export class Tab implements Groupable {
       if (!url.startsWith(`${INTERNAL_SCHEME}://${ERROR_HOST}/`)) this.failedUrl = null
       this.favicon = null
       this.media = null
-      this.playedMedia = false
+      this.siteCall = null
+      this.silenced = { mic: false, camera: false }
+      this.captures.clear()
       if (this.fromLink && !this.linkLanded && !isInternalUrl(url)) {
         this.fromLink = { ...this.fromLink, landedUrl: url }
         this.linkLanded = true
       }
       store.recordVisit(url, wc.getTitle())
       update()
+    })
+    // An iframe going to another page leaves its devices behind. (The page's own navigation clears them all.)
+    wc.on('did-frame-navigate', (_e, _url, _code, _status, isMainFrame, processId, frameId) => {
+      if (!isMainFrame && this.captures.delete(`${processId}:${frameId}`)) update()
     })
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
       if (!isMainFrame) return
@@ -632,7 +738,6 @@ export class Tab implements Groupable {
     })
     wc.on('did-finish-load', learnName)
     wc.on('audio-state-changed', update)
-    wc.on('media-started-playing', () => (this.playedMedia = true))
     wc.on('zoom-changed', (_e, direction) => this.zoom(direction))
 
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
@@ -643,7 +748,9 @@ export class Tab implements Groupable {
       if (details.reason === 'clean-exit') return
       this.loading = false
       this.media = null
-      this.playedMedia = false
+      this.siteCall = null
+      this.silenced = { mic: false, camera: false }
+      this.captures.clear()
       this.showError(this.url, 'crashed', 'This page crashed.')
     })
 

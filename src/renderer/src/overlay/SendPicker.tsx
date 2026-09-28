@@ -1,7 +1,8 @@
 import { Check, Clock, Search, Send, UserPlus } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { OmniboxAnchor, ShareDraft } from '@shared/types'
-import { formatTimestamp, shareUrl } from '@shared/youtube'
+import { shareUrl } from '@shared/links'
+import { formatTimestamp } from '@shared/media'
 import { sendMessage, signInWithGoogle, type Room } from '../social/api'
 import { displayName, roomTitle, useSocial } from '../social/SocialProvider'
 import { RoomAvatar } from '../ui/Avatar'
@@ -158,7 +159,7 @@ export function SendPicker({ draft, more = [], anchor, windowWidth }: Props): Re
       // One message per link, in tab order; the note goes with the first.
       for (const [i, d] of drafts.entries()) {
         await sendMessage(room.id, user.uid, i === 0 ? note || null : null, {
-          url: shareUrl(d.url, d.timestampSec, withTime && hasTimestamp),
+          url: shareUrl(d.url, withTime && hasTimestamp ? d.timestampSec : null),
           title: d.title,
           thumbnail: d.thumbnail,
           timestampSec: withTime && hasTimestamp ? d.timestampSec : null
