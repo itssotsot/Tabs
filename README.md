@@ -16,7 +16,7 @@ npm run dist:mac   # .dmg + .zip for Apple Silicon in dist/
 npm run dist:win   # NSIS installer for Intel/AMD Windows in dist/
 ```
 
-Builds are unsigned for now. On macOS, a friend opening the app for the first time needs to right-click → Open (or run `xattr -cr /Applications/Tabs.app`). Proper signing needs an Apple Developer account.
+The Mac app is signed with a free development certificate, not notarized by Apple, so a copy downloaded with a browser is blocked the first time ("Apple could not verify…"). On recent macOS, right-click → Open no longer gets past it, and **Open Anyway** in System Settings › Privacy & Security may not either. What works: `xattr -dr com.apple.quarantine /Applications/Tabs.app`, which removes the "downloaded from the internet" flag the browser added. Windows shows SmartScreen for the same reason (**More info › Run anyway**). Only the first install is affected: updates come through Tabs itself and never get the flag.
 
 ## Releasing updates
 

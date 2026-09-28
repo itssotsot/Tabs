@@ -78,6 +78,15 @@ Ad blocking: `src/preload/adblock.ts` asks for the page's scriptlets synchronous
 - `src/preload/capture.ts` runs in every web frame. In the page's world, it follows the streams the page gets, for `TabState.capture` (the tab's signs, the address bar's Stop menu, and Memory Saver keeping it awake). It also applies your devices (`settings.devices`, by name, since ids differ per site). Pages only get the names of devices they may use.
 - Testing: `--use-fake-device-for-media-stream=device-count=2` gives fake cameras and microphones. Don't pass `--use-fake-ui-for-media-stream`: it approves requests before the permission handler sees them.
 
+## Split view
+
+Two tabs side by side (`WindowState.splits`, pairs of tab ids). A pair shows whenever one of its tabs is the active tab; clicking into the other page makes it active (`Tab`'s `focus` → `onTabFocused`).
+- `BrowserWindowController.showViews()` is the one place page views go on and off screen (`visibleTabs`: the active tab, its split partner, or just a full-screen video). Use `isShown(tab)`, not `tab === activeTab`, for "on screen" (Memory Saver, discarding).
+- In the tab list a split is one row, its two tabs side by side (`tab-split` in `SiteGroups.tsx`). For that, `joinSplits` keeps them next to each other in the window's order (left, then right), and they're out of site groups until the split closes. Dragging either tab moves both.
+- `src/shared/split.ts` has the layout (`splitRects`) the main process and the browser UI both use, so the divider and the ring around the focused page (`chrome/SplitView.tsx`) line up with the pages.
+- Dragging a tab: `split.dragStart` returns JPEGs of the pages on screen. The UI shows them in the page area, then `split.hold(true)` takes the real pages off screen so its DOM gets the drag events and can animate the pictures. `split.finish` puts the pages back (with the new split, if dropped on a side). Tabs switch on click, not on press, so dragging one leaves the page you're on showing.
+- Testing the drag without a person: CDP `Input.setInterceptDrags` + `Input.dispatchDragEvent` on the browser UI's target gives real drag events. `screencapture -l<id>` (the id from `win.getMediaSourceId()`) captures the whole window, pages included.
+
 ## Building and running
 
 - `npm run typecheck` before committing. `npm run dev` for development.

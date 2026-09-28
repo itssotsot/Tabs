@@ -228,9 +228,9 @@ function discard(call: CallContext, tabId: unknown): chrome.tabs.Tab | undefined
   const target =
     found ??
     allTabs()
-      .filter((t) => t.tab.loaded && t.controller.activeTab !== t.tab)
+      .filter((t) => t.tab.loaded && !t.controller.isShown(t.tab))
       .sort((a, b) => a.tab.lastActiveAt - b.tab.lastActiveAt)[0]
-  if (!target || target.controller.activeTab === target.tab) return undefined
+  if (!target || target.controller.isShown(target.tab)) return undefined
   target.tab.sleep()
   return toChromeTab(target.tab, target.controller, call.extensionId)
 }

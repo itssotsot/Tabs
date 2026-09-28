@@ -2,7 +2,7 @@
 // have in common (the filter lists, the page's own videos); a site gets a file here, listed in SITES,
 // only for what that can't do.
 import { onDomain } from '@shared/links'
-import type { CallDevice, CallState } from '@shared/types'
+import type { CallDevice, CallPerson, CallState } from '@shared/types'
 import { meet } from './meet'
 import { spotify } from './spotify'
 import { youtube } from './youtube'
@@ -26,7 +26,9 @@ export interface PageSite {
     read(): CallState | null
     /** Turns the mic or camera on or off, with the page's own button so the call shows it. */
     toggle(device: CallDevice): void
-    /** The attributes whose changes can change what `read` says (besides elements coming and going). */
+    /** Who else is in the call, for the faces on the tab. */
+    people?(): CallPerson[]
+    /** The attributes whose changes can change what `read` (or `people`) says (besides elements coming and going). */
     attributes: string[]
   }
   /** Hidden while blocking ads, on top of the filter lists. */

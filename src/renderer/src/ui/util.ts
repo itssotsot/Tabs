@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 export function cx(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ')
 }
@@ -44,4 +46,40 @@ export function disableMiddleClickAutoscroll(): void {
   document.addEventListener('mousedown', (e) => {
     if (e.button === 1) e.preventDefault()
   })
+}
+
+/** How long after a failed icon it's tried again, then again, and so on, less often each time. */
+const ICON_RETRY_MS = [3_000, 15_000, 60_000, 5 * 60_000]
+
+/**
+ * Whether the icon at `src` failed to load. It's then tried again out of sight, soon and then less often, and as
+ * soon as the network is back, and shown once it loads. Failing is often just for a moment (Tabs opened before
+ * the network was up, as after the Mac wakes), and a sleeping tab never asks for its icon again.
+ */
+export function useFailingIcon(src: string | null | undefined): [failing: boolean, onError: () => void] {
+  const [failed, setFailed] = useState<string | null>(null)
+  const failing = !!src && failed === src
+  useEffect(() => {
+    if (!failing || !src) return
+    let stopped = false
+    let tries = 0
+    let timer: number | undefined
+    const attempt = (): void => {
+      window.clearTimeout(timer)
+      const probe = new Image()
+      probe.onload = () => !stopped && setFailed(null)
+      probe.onerror = () => {
+        if (!stopped) timer = window.setTimeout(attempt, ICON_RETRY_MS[Math.min(tries++, ICON_RETRY_MS.length - 1)])
+      }
+      probe.src = src
+    }
+    timer = window.setTimeout(attempt, ICON_RETRY_MS[tries++])
+    window.addEventListener('online', attempt)
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+      window.removeEventListener('online', attempt)
+    }
+  }, [failing, src])
+  return [failing, () => setFailed(src ?? null)]
 }

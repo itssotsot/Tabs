@@ -1,8 +1,9 @@
-import { ArrowDownToLine, ArrowLeft, ArrowRight, CircleArrowUp, MoreVertical } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeft, ArrowRight, CircleArrowUp, Columns2, MoreVertical } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { DownloadState, SidebarPanel, ToolbarExtension, UpdateReady, WindowState } from '@shared/types'
 import { useSocial } from '../social/SocialProvider'
 import { Avatar } from '../ui/Avatar'
+import { popupMenu } from '../ui/menu'
 import { cx, shortcut } from '../ui/util'
 import { ExtensionButtons } from './ExtensionButtons'
 import { Omnibox } from './Omnibox'
@@ -37,6 +38,21 @@ export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar, ex
       </button>
 
       <Omnibox tab={tab} isBookmarked={state.isBookmarked} />
+
+      {tab?.split && (
+        <button
+          className="icon-btn split-btn"
+          title="Split view"
+          onClick={() =>
+            void popupMenu([
+              { label: 'Swap sides', run: () => api.split.swap() },
+              { label: 'Close split view', run: () => api.split.close() }
+            ])
+          }
+        >
+          <Columns2 size={16} />
+        </button>
+      )}
 
       <ExtensionButtons extensions={extensions} />
 

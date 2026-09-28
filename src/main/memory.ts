@@ -49,7 +49,7 @@ function check(): void {
 
   for (const c of BrowserWindowController.all) {
     for (const tab of c.allTabs) {
-      if (tab === c.activeTab || !tab.loaded || mustStayAwake(tab)) continue
+      if (c.isShown(tab) || !tab.loaded || mustStayAwake(tab)) continue
       const idle = now - tab.lastActiveAt
       if (idle >= sleepAfter) tab.sleep()
       else if (idle >= FREEZE_AFTER_MS && !tab.isFrozen) void tab.freeze()

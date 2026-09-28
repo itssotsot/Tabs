@@ -6,8 +6,8 @@ import { RoomAvatar } from '../../ui/Avatar'
 import { popupMenu } from '../../ui/menu'
 import { cx, timeAgo } from '../../ui/util'
 import { pageKey, useLinks, type SharedLink } from './links'
-import { CallButtons, CaptureSigns, hasMediaBar, MediaButton, MediaProgress, MuteButton } from './media'
-import { LayoutButton, LinkIcon, linkTooltip, MarqueeText, StarButton, TabIcon, TabItem, useLinkCaption, useLinkMenu, useStoredState, useTabDrag } from './parts'
+import { hasMediaBar, MediaProgress } from './media'
+import { LayoutButton, LinkIcon, linkTooltip, MarqueeText, StarButton, TabControls, TabIcon, TabItem, useLinkCaption, useLinkMenu, useStoredState, useTabDrag } from './parts'
 import { closeGroupPeek, SiteGroupedTabs, siteGroups, useCollapsedSites } from './SiteGroups'
 
 const ROOM_PREVIEW = 4
@@ -336,15 +336,8 @@ function LinkRow({ link, tab, active, onOpen, onArchive }: LinkRowProps): ReactN
       }}
     >
       <LinkIcon url={url} link={link} favicon={tab ? <TabIcon tab={tab} /> : undefined} />
+      {tab && <TabControls tab={tab} />}
       <MarqueeText className="vlink-title" text={title} />
-      {tab && (
-        <span className="tab-actions">
-          <CaptureSigns tab={tab} />
-          <CallButtons tab={tab} />
-          <MuteButton tab={tab} animated />
-          <MediaButton tab={tab} />
-        </span>
-      )}
       <span className="vlink-time">{timeAgo(link.createdAt)}</span>
       <StarButton url={url} title={title} className="vlink-star" />
       <button

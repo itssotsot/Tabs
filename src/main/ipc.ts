@@ -1,7 +1,7 @@
 import { app, clipboard, ipcMain, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { IPC, type DownloadAction, type PageAdblock } from '@shared/api'
 import { SITE_PERMISSIONS, TAB_LAYOUTS, THEMES } from '@shared/constants'
-import type { AppInfo, AppNotification, CallDevice, CallState, CaptureDevice, DeviceChoice, ImportChoice, Insets, MediaCommand, OmniboxAnchor, PermissionAnswer, PermissionDecision, Rect, SearchEngine, Settings, SidebarPanel, SitePermission, Suggestion, TabCapture, TabLayout, TabMedia, ThemeId } from '@shared/types'
+import type { AppInfo, AppNotification, CallDevice, CallPerson, CaptureDevice, DeviceChoice, ImportChoice, Insets, MediaCommand, OmniboxAnchor, PageCall, PermissionAnswer, PermissionDecision, Rect, SearchEngine, Settings, SidebarPanel, SitePermission, Suggestion, TabCapture, TabLayout, TabMedia, ThemeId } from '@shared/types'
 import { pageKey } from '@shared/links'
 import { isInternalUrl, toNavigableUrl } from '@shared/url'
 import { blocksAdsOn, scriptletsFor } from './adblock'
@@ -51,12 +51,23 @@ const isMediaCommand = (v: unknown): v is MediaCommand => {
   return !!c && typeof c === 'object' && (c.type === 'toggle' || (c.type === 'seek' && isNumber(c.time)))
 }
 const isCallDevice = (v: unknown): v is CallDevice => v === 'mic' || v === 'camera'
-/** A page's report on its call's own controls (see CallState); null if it's not in one or the report doesn't make sense. */
-function callState(v: unknown): CallState | null {
-  const c = v as CallState | null
+/** The most people a call's report lists. */
+const MAX_CALL_PEOPLE = 100
+/** A page's report on its call's own controls (see PageCall); null if it's not in one or the report doesn't make sense. */
+function callState(v: unknown): PageCall | null {
+  const c = v as PageCall | null
   const isState = (x: unknown): x is boolean | null => x === null || typeof x === 'boolean'
   if (!c || typeof c !== 'object' || !isState(c.mic) || !isState(c.camera) || (c.mic === null && c.camera === null)) return null
-  return { mic: c.mic, camera: c.camera }
+  const people = Array.isArray(c.people) ? c.people.slice(0, MAX_CALL_PEOPLE).flatMap(callPerson) : []
+  return { mic: c.mic, camera: c.camera, people }
+}
+/** A photo from the web, or a small still the page drew from someone's camera. */
+const isCallPicture = (v: unknown): v is string =>
+  isString(v) && ((/^https:\/\//.test(v) && v.length <= 2048) || (/^data:image\/(jpeg|png|webp);base64,/.test(v) && v.length <= 32_000))
+function callPerson(v: unknown): CallPerson[] {
+  const p = v as CallPerson | null
+  if (!p || typeof p !== 'object' || !isString(p.name) || !p.name.trim()) return []
+  return [{ name: p.name.trim().slice(0, 80), picture: isCallPicture(p.picture) ? p.picture : null }]
 }
 /** A page's report on its video (see TabMedia), cleaned up; null if there's none or it doesn't make sense. */
 function tabMedia(v: unknown): TabMedia | null {
@@ -212,6 +223,14 @@ export function registerIpc(): void {
   onChrome(IPC.tabCall, (c, id, device) => {
     if (isNumber(id) && isCallDevice(device)) c.tabById(id)?.controlCall(device)
   })
+  handleChrome(IPC.splitDragStart, (c, id) => (isNumber(id) ? c.splitDragStart(id) : null))
+  onChrome(IPC.splitHold, (c, held) => c.holdPages(held === true))
+  handleChrome(IPC.splitFinish, (c, id, side) => {
+    if (isNumber(id)) c.finishSplitDrag(id, side === 'left' || side === 'right' ? side : null)
+  })
+  onChrome(IPC.splitResize, (c, ratio) => isNumber(ratio) && c.resizeSplit(ratio))
+  onChrome(IPC.splitClose, (c) => c.closeSplit())
+  onChrome(IPC.splitSwap, (c) => c.swapSplit())
   onChrome(IPC.navigate, (c, input) => {
     if (!isString(input) || enterOmniboxInput(input.trim(), 'currentTab')) return
     c.navigate(toNavigableUrl(input, store.settings.searchEngine))

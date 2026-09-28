@@ -18,6 +18,7 @@ import { FindBar } from './FindBar'
 import { WhatsNew } from './WhatsNew'
 import { Intro, type IntroMode } from './intro/Intro'
 import { Sidebar } from './Sidebar'
+import { Viewport } from './SplitView'
 import { GroupsStrip } from './tabs/GroupsStrip'
 import { LinksProvider } from './tabs/links'
 import { Overview } from './tabs/Overview'
@@ -32,7 +33,8 @@ const EMPTY_STATE: WindowState = {
   isBookmarked: false,
   profile: null,
   groupNames: {},
-  groupColors: {}
+  groupColors: {},
+  splits: []
 }
 
 /**
@@ -169,6 +171,8 @@ export function App(): ReactNode {
   // re-rendering the browser UI. The tab's state has them too, for when you switch tabs.
   // Only in themes that follow the page's color; the others keep their own.
   const activeTab = state.tabs.find((t) => t.id === activeTabId)
+  // Two pages side by side: one page's top edge would stretch across both, so the toolbar takes just its color.
+  const split = !!activeTab?.split
   const liveEdge = useRef<PageEdge | null>(null)
   const paintEdge = useRef<() => void>(() => {})
   paintEdge.current = () => {
@@ -177,12 +181,12 @@ export function App(): ReactNode {
     if (!followsPage) return applyPageEdge(header, null, null, 0)
     const live = liveEdge.current?.tabId === activeTabId ? liveEdge.current : null
     const color = live?.color ?? activeTab?.color ?? null
-    applyPageEdge(header, color, live?.edge ?? activeTab?.edge ?? null, sidebarWidth)
+    applyPageEdge(header, color, split ? null : (live?.edge ?? activeTab?.edge ?? null), sidebarWidth)
   }
   useLayoutEffect(() => {
     liveEdge.current = null
   }, [activeTabId])
-  useLayoutEffect(() => paintEdge.current(), [activeTabId, activeTab?.color, activeTab?.edge, sidebarWidth, followsPage])
+  useLayoutEffect(() => paintEdge.current(), [activeTabId, activeTab?.color, activeTab?.edge, sidebarWidth, followsPage, split])
   useEffect(
     () =>
       api.onPageEdge((edge) => {
@@ -224,7 +228,7 @@ export function App(): ReactNode {
             <WhatsNew hidden={!!intro} />
           </header>
           <div className="chrome-body">
-            {overview ? <Overview state={state} onClose={() => setOverview(false)} /> : <div className="viewport" />}
+            {overview ? <Overview state={state} onClose={() => setOverview(false)} /> : <Viewport state={state} />}
             {sidebar && (
               <aside ref={sidebarRef} className="sidebar">
                 <Sidebar

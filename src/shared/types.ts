@@ -1,3 +1,5 @@
+import type { SplitSide, SplitState } from './split'
+
 /** The link from a chat that a tab was opened from. */
 export interface TabLink {
   /** The link's key: `${roomId}/${messageId}`, with `#n` for links in the message's text. */
@@ -39,6 +41,10 @@ export interface TabState {
   color: string | null
   /** The colors along the top of the page from left to right, evenly spaced, which the toolbar extends upward. */
   edge: string[] | null
+  /** Its side of a split view and the tab on the other side, when it's in one (see WindowState.splits). */
+  split?: { side: SplitSide; with: number }
+  /** Its page is on screen: it's the active tab, or the other half of the active tab's split. */
+  onScreen?: boolean
 }
 
 /** Where a tab's video is. The strip works out the current position from `time`, `rate` and `at`. */
@@ -62,12 +68,24 @@ export interface CallState {
   camera: boolean | null
 }
 
+/** Someone else in a call, as the call shows them. */
+export interface CallPerson {
+  name: string
+  /** A still from their camera while it's on (a data: URL), else their photo; null when the call shows neither. */
+  picture: string | null
+}
+
+/** What a page reports about its call: its mic and camera, and who else is in it (on sites Tabs can read that from). */
+export interface PageCall extends CallState {
+  people: CallPerson[]
+}
+
 /**
  * A tab's call, for its mic and camera buttons. `by` says who mutes: `site`, the call's own buttons (the call shows
  * you muted); or `tabs`, Tabs itself, for sites it can't press the buttons of (the call hears silence, or sees black,
- * but doesn't know).
+ * but doesn't know). `people` is empty when Tabs can't tell who's in it.
  */
-export interface TabCall extends CallState {
+export interface TabCall extends PageCall {
   by: 'site' | 'tabs'
 }
 
@@ -154,6 +172,26 @@ export interface WindowState {
   groupNames: Record<string, string>
   /** Each site group's color: the one picked for its site, else one from the site's name. */
   groupColors: Record<string, string>
+  /** Pairs of tabs shown side by side. A pair shows whenever one of its tabs is the active tab. */
+  splits: SplitState[]
+}
+
+/** A picture of a page on screen, for the split view's drop area to show in its place while a tab is dragged. */
+export interface SplitPane {
+  tabId: number
+  /** Where the page is, relative to the page area's top left. */
+  rect: Rect
+  /** A JPEG of the page, or null when it couldn't be taken. */
+  image: Uint8Array | null
+}
+
+/** What's on screen as a tab starts being dragged (see BrowserrAPI.split). */
+export interface SplitDragStart {
+  panes: SplitPane[]
+  /** The tab a split made from this drag would share the window with, when there's no split showing. */
+  partner: number | null
+  /** The split on screen, if the pages on screen are one. */
+  split: SplitState | null
 }
 
 export interface FindState {

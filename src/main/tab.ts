@@ -13,7 +13,7 @@ import {
 } from 'electron'
 import { IPC } from '@shared/api'
 import { themeInfo } from '@shared/constants'
-import type { CallDevice, CallState, CaptureDevice, MediaCommand, TabCall, TabCapture, TabLink, TabMedia, TabState } from '@shared/types'
+import type { CallDevice, CaptureDevice, MediaCommand, PageCall, TabCall, TabCapture, TabLink, TabMedia, TabState } from '@shared/types'
 import { pageKey } from '@shared/links'
 import { mediaPosition } from '@shared/media'
 import { INTERNAL_SCHEME, isInternalUrl, NEW_TAB_URL, prettyUrl } from '@shared/url'
@@ -36,6 +36,8 @@ export interface TabHost {
   openTab(url: string, options: { active: boolean; opener: Tab }): void
   onTabFullscreen(tab: Tab, fullscreen: boolean): void
   onFindResult(tab: Tab, result: Result): void
+  /** The page got the keyboard focus, as when it's clicked. */
+  onTabFocused(tab: Tab): void
   showPageContextMenu(tab: Tab, params: ContextMenuParams): void
   handleInput(input: Input): boolean
 }
@@ -190,7 +192,7 @@ export class Tab implements Groupable {
   /** The page's video, as its preload last reported it. */
   private media: TabMedia | null = null
   /** The page's call, from its own controls, as its preload last reported it (see call-controls.ts). */
-  private siteCall: CallState | null = null
+  private siteCall: PageCall | null = null
   /** Tabs' own mute, for a call whose controls it can't use (see `call`). */
   private silenced = { mic: false, camera: false }
   private callDrawTimer: ReturnType<typeof setTimeout> | undefined
@@ -587,7 +589,7 @@ export class Tab implements Groupable {
     if (this.siteCall) return { ...this.siteCall, by: 'site' }
     const capture = this.capture
     if (!capture?.microphone && !capture?.camera) return null
-    return { mic: capture.microphone ? !this.silenced.mic : null, camera: capture.camera ? !this.silenced.camera : null, by: 'tabs' }
+    return { mic: capture.microphone ? !this.silenced.mic : null, camera: capture.camera ? !this.silenced.camera : null, people: [], by: 'tabs' }
   }
 
   /** Which of your devices the page's frames are using; null when none. */
@@ -633,8 +635,8 @@ export class Tab implements Groupable {
     for (const frame of this.framesUsing(device)) frame.send(IPC.pageCaptureStop, device)
   }
 
-  /** What the page's call reported from its own controls: its mic and camera, or null when it's not in one. */
-  setCall(call: CallState | null): void {
+  /** What the page's call reported from its own controls: its mic, camera and people, or null when it's not in one. */
+  setCall(call: PageCall | null): void {
     this.siteCall = call
     this.host.onTabUpdated(this)
   }
@@ -773,6 +775,7 @@ export class Tab implements Groupable {
     })
 
     wc.on('found-in-page', (_e, result) => this.host.onFindResult(this, result))
+    wc.on('focus', () => this.host.onTabFocused(this))
     wc.on('context-menu', (_e, params) => this.host.showPageContextMenu(this, params))
     wc.on('enter-html-full-screen', () => this.host.onTabFullscreen(this, true))
     wc.on('leave-html-full-screen', () => this.host.onTabFullscreen(this, false))

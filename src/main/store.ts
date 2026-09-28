@@ -78,6 +78,8 @@ export interface SavedWindow {
   maximized: boolean
   tabs: SavedTab[]
   activeIndex: number
+  /** Tabs shown side by side, by their place in `tabs`. */
+  splits?: { left: number; right: number; ratio: number }[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {

@@ -1,8 +1,9 @@
 import { Mic, MicOff, MonitorUp, Pause, Play, Video, VideoOff, Volume2, VolumeX } from 'lucide-react'
 import { useState, type PointerEvent, type ReactNode } from 'react'
-import type { TabMedia, TabState } from '@shared/types'
+import { colorFor } from '@shared/colors'
+import type { CallPerson, TabMedia, TabState } from '@shared/types'
 import { formatTimestamp, mediaPosition } from '@shared/media'
-import { cx } from '../../ui/util'
+import { cx, useFailingIcon } from '../../ui/util'
 
 /** The tab shows a progress bar, so it's drawn a little taller in lists (`has-media`). */
 export function hasMediaBar(tab: TabState): boolean {
@@ -81,6 +82,39 @@ export function CallButtons({ tab, micOnly }: { tab: TabState; micOnly?: boolean
         </button>
       )}
     </>
+  )
+}
+
+/** How many faces the tab shows of the people in its call; past that, two faces and a count. */
+const FACES = 3
+const names = new Intl.ListFormat('en', { type: 'conjunction' })
+
+/** The others in the tab's call (Google Meet): a few faces, and how many more. Their names are in the tooltip. */
+export function CallPeople({ tab }: { tab: TabState }): ReactNode {
+  const people = tab.call?.people
+  if (!people?.length) return null
+  const faces = people.length > FACES ? people.slice(0, FACES - 1) : people
+  const more = people.length - faces.length
+  const named = people.length > FACES ? [...people.slice(0, FACES).map((p) => p.name), `${people.length - FACES} more`] : people.map((p) => p.name)
+  return (
+    <span className="tab-people" title={`In the call: ${names.format(named)}`}>
+      {faces.map((p, i) => (
+        <CallFace key={`${i}:${p.name}`} person={p} />
+      ))}
+      {more > 0 && <span className="tab-face tab-face-more">+{more}</span>}
+    </span>
+  )
+}
+
+function CallFace({ person }: { person: CallPerson }): ReactNode {
+  const [failing, onError] = useFailingIcon(person.picture)
+  if (person.picture && !failing) {
+    return <img className="tab-face" src={person.picture} alt="" referrerPolicy="no-referrer" draggable={false} onError={onError} />
+  }
+  return (
+    <span className="tab-face tab-face-letter" style={{ background: colorFor(person.name) }}>
+      {person.name.charAt(0).toUpperCase()}
+    </span>
   )
 }
 

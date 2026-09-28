@@ -27,11 +27,13 @@ import type {
   SidebarPanel,
   SiteAccess,
   SitePermission,
+  SplitDragStart,
   Suggestion,
   ToolbarExtension,
   UpdateReady,
   WindowState
 } from './types'
+import type { SplitSide } from './split'
 
 export const IPC = {
   // chrome -> main
@@ -48,6 +50,12 @@ export const IPC = {
   tabMedia: 'tab:media',
   tabCall: 'tab:call',
   tabStopCapture: 'tab:stop-capture',
+  splitDragStart: 'split:drag-start',
+  splitHold: 'split:hold',
+  splitFinish: 'split:finish',
+  splitResize: 'split:resize',
+  splitClose: 'split:close',
+  splitSwap: 'split:swap',
   navigate: 'nav:navigate',
   navBack: 'nav:back',
   navForward: 'nav:forward',
@@ -221,6 +229,23 @@ export interface BrowserrAPI {
     call(id: number, device: CallDevice): void
     /** Stops the tab using your camera, microphone or screen (see TabState.capture). */
     stopCapture(id: number, device: CaptureDevice): void
+  }
+  /** Tabs side by side (WindowState.splits), made by dragging a tab onto the page. */
+  split: {
+    /**
+     * A tab started being dragged: pictures of the pages on screen, for the drop area to show in their place.
+     * Null when the tab can't make a split (it's alone in the window, or a video is full screen).
+     */
+    dragStart(tabId: number): Promise<SplitDragStart | null>
+    /** Takes the pages off the screen while the drop area stands in for them, or puts them back. */
+    hold(held: boolean): void
+    /** The drag is over: dropped on `side`, or on no side (null). Resolves once the pages are back on screen. */
+    finish(tabId: number, side: SplitSide | null): Promise<void>
+    /** The divider moved: how much of the width the left page gets. */
+    resize(ratio: number): void
+    /** Back to one page: the one you were using. */
+    close(): void
+    swap(): void
   }
   nav: {
     go(input: string): void

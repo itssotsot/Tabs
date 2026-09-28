@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type BrowserrAPI, type Unsubscribe } from '@shared/api'
+import type { PageEdge, WindowState } from '@shared/types'
 import { followTheme } from './theme'
 
 function on<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
@@ -7,6 +8,23 @@ function on<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
   ipcRenderer.on(channel, listener)
   return () => ipcRenderer.removeListener(channel, listener)
 }
+
+/**
+ * Like `on`, for state the main process sends as it changes: a new subscriber gets the latest right away. The
+ * first is sent when the UI has loaded, which can be before React has subscribed; without this, the tab list
+ * stayed empty until something changed.
+ */
+function latest<T>(channel: string): (cb: (payload: T) => void) => Unsubscribe {
+  let last: { payload: T } | null = null
+  ipcRenderer.on(channel, (_e, payload: T) => (last = { payload }))
+  return (cb) => {
+    if (last) cb(last.payload)
+    return on(channel, cb)
+  }
+}
+
+const windowState = latest<WindowState>(IPC.windowState)
+const pageEdge = latest<PageEdge>(IPC.pageEdge)
 
 const api: BrowserrAPI = {
   platform: process.platform,
@@ -25,6 +43,14 @@ const api: BrowserrAPI = {
     call: (id, device) => ipcRenderer.send(IPC.tabCall, id, device),
     stopCapture: (id, device) => ipcRenderer.send(IPC.tabStopCapture, id, device)
   },
+  split: {
+    dragStart: (tabId) => ipcRenderer.invoke(IPC.splitDragStart, tabId),
+    hold: (held) => ipcRenderer.send(IPC.splitHold, held),
+    finish: (tabId, side) => ipcRenderer.invoke(IPC.splitFinish, tabId, side),
+    resize: (ratio) => ipcRenderer.send(IPC.splitResize, ratio),
+    close: () => ipcRenderer.send(IPC.splitClose),
+    swap: () => ipcRenderer.send(IPC.splitSwap)
+  },
   nav: {
     go: (input) => ipcRenderer.send(IPC.navigate, input),
     back: () => ipcRenderer.send(IPC.navBack),
@@ -34,8 +60,8 @@ const api: BrowserrAPI = {
     resetZoom: () => ipcRenderer.send(IPC.zoomReset),
     pasteAndGo: () => ipcRenderer.send(IPC.pasteAndGo)
   },
-  onWindowState: (cb) => on(IPC.windowState, cb),
-  onPageEdge: (cb) => on(IPC.pageEdge, cb),
+  onWindowState: windowState,
+  onPageEdge: pageEdge,
   onCommand: (cb) => on(IPC.command, cb),
   setInsets: (insets) => ipcRenderer.send(IPC.setInsets, insets),
   siteInfoMenu: () => ipcRenderer.send(IPC.siteInfoMenu),

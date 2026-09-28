@@ -495,6 +495,13 @@ export function showTabContextMenu(c: BrowserWindowController, tab: Tab): void {
       { label: muted ? 'Unmute Site' : 'Mute Site', click: () => tab.toggleMute() },
       !tab.isInternal && { label: 'Send to a Friend…', click: () => void c.openSendPickerForTab(tab) },
       separator,
+      ...(c.splitOf(tab)
+        ? [
+            { label: 'Swap Sides', click: () => c.swapSplit(tab) },
+            { label: 'Close Split View', click: () => c.closeSplit(tab) }
+          ]
+        : [{ label: 'Open in Split View', enabled: c.allTabs.length > 1, click: () => c.openInSplit(tab) }]),
+      separator,
       { label: 'Close Tab', click: () => c.closeTab(tab) },
       { label: 'Close Other Tabs', click: () => c.closeOtherTabs(tab) },
       { label: `Close Tabs ${after}`, click: () => c.closeTabsToRight(tab) },

@@ -11,8 +11,9 @@ import {
   SUGGESTION_PADDING,
   SUGGESTION_ROW_HEIGHT
 } from '@shared/constants'
-import type { ChromeCommand, Insets, OmniboxAnchor, OverlayState, Rect, ShareDraft, Suggestion, TabLink, WindowState } from '@shared/types'
+import type { ChromeCommand, Insets, OmniboxAnchor, OverlayState, Rect, ShareDraft, SplitDragStart, Suggestion, TabLink, WindowState } from '@shared/types'
 import { pageKey } from '@shared/links'
+import { clampRatio, splitAfterDrop, splitRects, SPLIT_RADIUS, type SplitSide, type SplitState } from '@shared/split'
 import { NEW_TAB_URL } from '@shared/url'
 import { browserEvents } from './browser-events'
 import { extensionHooks } from './extension-hooks'
@@ -38,6 +39,30 @@ prompts.on('changed', (wc: WebContents) => controllerFor(wc)?.showPrompt())
 
 /** Until the overlay says how tall the question is. */
 const PROMPT_START_HEIGHT = 200
+/** The longest the pages stay off screen for a tab being dragged, in case the browser UI never says the drag ended. */
+const SPLIT_HOLD_MAX_MS = 60_000
+/** The longest a picture of a page for the split view's drop area is waited for. A covered window draws none. */
+const SPLIT_CAPTURE_TIMEOUT_MS = 400
+
+/** Two tabs side by side. */
+interface Split {
+  left: Tab
+  right: Tab
+  ratio: number
+}
+
+/** A picture of the page as a JPEG, or null when there's none to be had in time. */
+async function pagePicture(wc: WebContents): Promise<Uint8Array | null> {
+  try {
+    const image = await Promise.race([
+      wc.capturePage(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), SPLIT_CAPTURE_TIMEOUT_MS))
+    ])
+    return image && !image.isEmpty() ? image.toJPEG(82) : null
+  } catch {
+    return null
+  }
+}
 /** Recently closed tabs (with their history), most recent last. Shared across windows like Chrome. */
 const closedTabs: SavedTab[] = []
 
@@ -49,6 +74,10 @@ function snapshotOf(saved: SavedTab): TabSnapshot {
     entries: saved.entries?.map((e) => ({ url: e.url, title: e.title })),
     index: saved.index
   }
+}
+
+function splitIds(split: Split): SplitState {
+  return { left: split.left.id, right: split.right.id, ratio: split.ratio }
 }
 
 let lastFocused: BrowserWindowController | null = null
@@ -138,6 +167,15 @@ export class BrowserWindowController implements TabHost {
   private colorTimer: NodeJS.Timeout
   /** Sites whose group was broken up with Ungroup. It forms again when another tab from the site opens. */
   private readonly suspendedSites = new Set<string>()
+  /** Pairs of tabs shown side by side. A tab is in at most one. */
+  private splits: Split[] = []
+  /** The pages on screen, with the view each was put up with (a tab's view goes when it sleeps or closes). */
+  private shown: { tab: Tab; view: WebContentsView }[] = []
+  /** While a tab is dragged, the browser UI shows pictures of the pages in their place, to animate them. */
+  private held = false
+  private holdTimer: NodeJS.Timeout | null = null
+  /** The tab being dragged and who it would share the window with, from splitDragStart. */
+  private splitDrag: { tab: Tab; partner: Tab | null } | null = null
 
   constructor(options: WindowOptions = {}) {
     const saved = options.restore
@@ -190,6 +228,11 @@ export class BrowserWindowController implements TabHost {
         if (t.createdAt) tab.createdAt = t.createdAt
         if (t.joinedGroup) tab.joinedGroup = t.joinedGroup
         this.tabs.push(tab)
+      }
+      for (const s of saved.splits ?? []) {
+        const left = this.tabs[s.left]
+        const right = this.tabs[s.right]
+        if (left && right && left !== right && !this.splitOf(left) && !this.splitOf(right)) this.splits.push({ left, right, ratio: clampRatio(s.ratio, Infinity) })
       }
       this.regroup()
       this.activate(this.tabs[Math.min(saved.activeIndex, this.tabs.length - 1)] ?? this.tabs[0])
@@ -315,11 +358,16 @@ export class BrowserWindowController implements TabHost {
   }
 
   toSaved(): SavedWindow {
+    const kept = this.tabs.filter((t) => !t.url.startsWith(NEW_TAB_URL) || t.pinned)
+    const splits = this.splits
+      .map((s) => ({ left: kept.indexOf(s.left), right: kept.indexOf(s.right), ratio: s.ratio }))
+      .filter((s) => s.left !== -1 && s.right !== -1)
     return {
       bounds: this.win.getNormalBounds(),
       maximized: this.win.isMaximized(),
-      tabs: this.tabs.filter((t) => !t.url.startsWith(NEW_TAB_URL) || t.pinned).map((t) => t.toSaved()),
-      activeIndex: Math.max(0, this.active ? this.tabs.filter((t) => !t.url.startsWith(NEW_TAB_URL) || t.pinned).indexOf(this.active) : 0)
+      tabs: kept.map((t) => t.toSaved()),
+      activeIndex: Math.max(0, this.active ? kept.indexOf(this.active) : 0),
+      splits: splits.length ? splits : undefined
     }
   }
 
@@ -338,22 +386,70 @@ export class BrowserWindowController implements TabHost {
     this.layout()
   }
 
+  /** Where pages go: the window below the toolbar, between the tab list and the sidebar. */
+  private pageArea(): Rect {
+    const [width, height] = this.win.getContentSize()
+    const { top, left, right } = this.insets
+    return { x: left, y: top, width: Math.max(0, width - left - right), height: Math.max(0, height - top) }
+  }
+
   private layout(): void {
     if (this.win.isDestroyed()) return
     const [width, height] = this.win.getContentSize()
-    if (this.active) {
-      this.active.view.setBounds(
-        this.fullscreenTab === this.active
-          ? { x: 0, y: 0, width, height }
-          : {
-              x: this.insets.left,
-              y: this.insets.top,
-              width: Math.max(0, width - this.insets.left - this.insets.right),
-              height: Math.max(0, height - this.insets.top)
-            }
-      )
+    const area = this.pageArea()
+    const split = this.shownSplit
+    const rects = split && splitRects(area.width, area.height, split.ratio)
+    for (const { tab, view } of this.shown) {
+      if (tab === this.fullscreenTab) {
+        view.setBounds({ x: 0, y: 0, width, height })
+        view.setBorderRadius(0)
+      } else if (rects && split) {
+        const r = rects[tab === split.left ? 'left' : 'right']
+        view.setBounds({ x: area.x + r.x, y: area.y + r.y, width: r.width, height: r.height })
+        view.setBorderRadius(SPLIT_RADIUS)
+      } else {
+        view.setBounds(area)
+        view.setBorderRadius(0)
+      }
     }
     if (this.overlayState.mode === 'send') this.overlay.setBounds({ x: 0, y: 0, width, height })
+  }
+
+  /** The tabs whose pages belong on screen: the active tab, and the other half of its split. */
+  private get visibleTabs(): Tab[] {
+    if (this.held) return []
+    if (this.fullscreenTab) return [this.fullscreenTab]
+    const split = this.shownSplit
+    if (split) return [split.left, split.right]
+    return this.active ? [this.active] : []
+  }
+
+  /** Whether the tab's page is on screen (the active tab, or the other half of its split). */
+  isShown(tab: Tab): boolean {
+    return tab === this.active || this.visibleTabs.includes(tab)
+  }
+
+  /** Puts the pages that belong on screen there, and takes the others off. */
+  private showViews(): void {
+    if (this.win.isDestroyed()) return
+    const want = this.visibleTabs
+    const kept = this.shown.filter((s) => want.includes(s.tab) && s.tab.liveWc === s.view.webContents)
+    for (const s of this.shown) {
+      if (kept.includes(s)) continue
+      this.win.contentView.removeChildView(s.view)
+      s.tab.lastActiveAt = Date.now()
+    }
+    for (const tab of want) {
+      if (kept.some((s) => s.tab === tab)) continue
+      const view = tab.view
+      // Index 0 keeps the page under the overlay when both are attached.
+      this.win.contentView.addChildView(view, 0)
+      kept.push({ tab, view })
+      void tab.thaw()
+      tab.releaseMedia()
+    }
+    this.shown = kept
+    this.layout()
   }
 
   private scheduleState(): void {
@@ -375,9 +471,14 @@ export class BrowserWindowController implements TabHost {
       groupColors[site] ??= siteColor(site)
     }
     const state: WindowState = {
-      tabs: this.tabs.map((t) => ({ ...t.state, group: groups.get(t) ?? null })),
+      tabs: this.tabs.map((t) => {
+        const s = this.splitOf(t)
+        const split = s && (s.left === t ? { side: 'left' as const, with: s.right.id } : { side: 'right' as const, with: s.left.id })
+        return { ...t.state, group: groups.get(t) ?? null, split, onScreen: this.isShown(t) }
+      }),
       groupNames,
       groupColors,
+      splits: this.splits.map(splitIds),
       activeTabId: active?.id ?? null,
       htmlFullscreen: !!this.fullscreenTab,
       fullscreen: this.win.isFullScreen(),
@@ -444,17 +545,12 @@ export class BrowserWindowController implements TabHost {
   activate(tab: Tab): void {
     if (this.active === tab) return
     if (this.active) {
-      this.active.wc.stopFindInPage('clearSelection')
-      this.win.contentView.removeChildView(this.active.view)
+      this.active.liveWc?.stopFindInPage('clearSelection')
       this.active.lastActiveAt = Date.now()
     }
     tab.lastActiveAt = Date.now()
-    void tab.thaw()
-    tab.releaseMedia()
     this.active = tab
-    // Index 0 keeps the tab under the overlay when both are attached.
-    this.win.contentView.addChildView(tab.view, 0)
-    this.layout()
+    this.showViews()
     tab.wc.focus()
     this.win.webContents.send(IPC.findState, { open: false, matches: 0, activeMatch: 0 })
     this.scheduleState()
@@ -477,12 +573,17 @@ export class BrowserWindowController implements TabHost {
     this.tabs.splice(index, 1)
     browserEvents.emit('tab-closed', tab, this, false)
     if (this.fullscreenTab === tab) this.onTabFullscreen(tab, false)
+    // The other half of its split takes the whole window.
+    const split = this.splitOf(tab)
+    const partner = split && (split.left === tab ? split.right : split.left)
+    if (split) this.splits = this.splits.filter((s) => s !== split)
     if (this.active === tab) {
-      this.win.contentView.removeChildView(tab.view)
       this.active = null
-      const next = this.tabs[index] ?? this.tabs[index - 1]
+      const next = partner ?? this.tabs[index] ?? this.tabs[index - 1]
       if (next) this.activate(next)
     }
+    if (this.splitDrag?.tab === tab || this.splitDrag?.partner === tab) this.splitDrag = null
+    this.showViews()
     tab.destroy()
     // Closing the last tab leaves the window open on a new tab; Close Window (⇧⌘W) is how you close it.
     if (!this.tabs.length) {
@@ -546,6 +647,11 @@ export class BrowserWindowController implements TabHost {
   dragTab(id: number, toIndex: number, into?: string | null): void {
     const tab = this.tabById(id)
     if (!tab) return
+    // Either tab of a split's row takes the other along.
+    if (this.splitOf(tab)) {
+      this.moveTab(id, toIndex)
+      return this.arrange(tab)
+    }
     if (into !== undefined && !tab.pinned) {
       this.moveTab(id, toIndex)
       if (into === null) this.leaveGroups(tab)
@@ -567,13 +673,133 @@ export class BrowserWindowController implements TabHost {
     this.arrange()
   }
 
+  // ---- split view ----
+
+  splitOf(tab: Tab): Split | undefined {
+    return this.splits.find((s) => s.left === tab || s.right === tab)
+  }
+
+  /** The split on screen: the active tab's, if it's in one. */
+  private get shownSplit(): Split | null {
+    return (this.active && this.splitOf(this.active)) || null
+  }
+
+  /** Who a split made with `tab` would share the window with: the page you're looking at, else the one before it. */
+  private splitPartner(tab: Tab): Tab | null {
+    if (this.active && this.active !== tab) return this.active
+    return this.tabs.filter((t) => t !== tab).sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0] ?? null
+  }
+
+  /** Puts two tabs side by side, taking them out of any split they were in, and switches to `focus`. */
+  private setSplit(left: Tab, right: Tab, ratio: number, focus: Tab): void {
+    this.splits = this.splits.filter((s) => ![s.left, s.right].some((t) => t === left || t === right))
+    this.splits.push({ left, right, ratio })
+    if (this.active === focus) this.showViews()
+    else this.activate(focus)
+    // Their row goes where the tab that was already there is, and out of its site's group.
+    this.arrange(focus === left ? right : left)
+  }
+
+  /** Shows `tab` beside the page you're looking at (on the right), from its menu. */
+  openInSplit(tab: Tab): void {
+    const partner = this.splitPartner(tab)
+    if (partner) this.setSplit(partner, tab, 0.5, tab)
+  }
+
+  /** Back to one page: the split's tabs go back to being separate tabs. */
+  closeSplit(tab: Tab | null = this.active): void {
+    const split = tab && this.splitOf(tab)
+    if (!split) return
+    this.splits = this.splits.filter((s) => s !== split)
+    this.showViews()
+    // Back in their sites' groups.
+    this.arrange()
+  }
+
+  swapSplit(tab: Tab | null = this.active): void {
+    const split = tab && this.splitOf(tab)
+    if (!split) return
+    ;[split.left, split.right] = [split.right, split.left]
+    split.ratio = 1 - split.ratio
+    this.layout()
+    this.arrange()
+  }
+
+  /** The divider was dragged: `ratio` is how much of the width the left page gets. */
+  resizeSplit(ratio: number): void {
+    const split = this.shownSplit
+    if (!split) return
+    split.ratio = clampRatio(ratio, this.pageArea().width)
+    this.layout()
+    this.scheduleState()
+  }
+
+  /** Clicking into the other page of a split makes it the tab you're using. */
+  onTabFocused(tab: Tab): void {
+    if (tab !== this.active && !this.held && this.visibleTabs.includes(tab)) this.activate(tab)
+  }
+
+  /**
+   * A tab started being dragged in the tab list: pictures of the pages on screen, which the browser UI shows in
+   * their place (see holdPages) so it can move them around as you pick a side. Null when there's no split to make.
+   */
+  async splitDragStart(id: number): Promise<SplitDragStart | null> {
+    const tab = this.tabById(id)
+    const area = this.pageArea()
+    this.splitDrag = null
+    if (!tab || this.fullscreenTab || this.held || !area.width || !area.height) return null
+    const split = this.shownSplit
+    const partner = split ? null : this.splitPartner(tab)
+    if (!split && !partner) return null
+    const panes = await Promise.all(
+      this.shown.map(async ({ tab: shown, view }) => {
+        const b = view.getBounds()
+        return { tabId: shown.id, rect: { x: b.x - area.x, y: b.y - area.y, width: b.width, height: b.height }, image: await pagePicture(view.webContents) }
+      })
+    )
+    this.splitDrag = { tab, partner }
+    return { panes, partner: partner?.id ?? null, split: split ? splitIds(split) : null }
+  }
+
+  /** Takes the pages off the screen while the browser UI shows pictures of them, or puts them back. */
+  holdPages(held: boolean): void {
+    if (held && !this.splitDrag) return
+    if (this.holdTimer) clearTimeout(this.holdTimer)
+    this.holdTimer = held ? setTimeout(() => this.holdPages(false), SPLIT_HOLD_MAX_MS) : null
+    if (this.held === held) return
+    this.held = held
+    this.showViews()
+  }
+
+  /** The drag is over: dropped on a side of the page area, or elsewhere (null). The pages go back on screen. */
+  finishSplitDrag(id: number, side: SplitSide | null): void {
+    const drag = this.splitDrag
+    this.splitDrag = null
+    let made = false
+    if (drag && side && drag.tab.id === id && this.tabs.includes(drag.tab)) {
+      const current = this.shownSplit
+      const next = splitAfterDrop(id, side, current && splitIds(current), drag.partner?.id ?? null)
+      const left = next && this.tabById(next.left)
+      const right = next && this.tabById(next.right)
+      if (left && right) {
+        this.setSplit(left, right, next.ratio, drag.tab)
+        made = true
+      }
+    }
+    this.holdPages(false)
+    // It was focused while off screen.
+    if (made) this.active?.liveWc?.focus()
+  }
+
   // ---- site groups ----
 
   /** The group each tab is in: its site, when grouping is on and at least two tabs share it. */
   private currentGroups(): Map<Tab, string> {
     const { groupTabsBySite, ungroupedSites } = store.settings
     if (!groupTabsBySite) return new Map()
-    return siteGroups(this.tabs, new Set([...ungroupedSites, ...this.suspendedSites]))
+    // A split's tabs show as one row of their own in the tab list, outside any group.
+    const groupable = this.tabs.filter((t) => !this.splitOf(t))
+    return siteGroups(groupable, new Set([...ungroupedSites, ...this.suspendedSites]))
   }
 
   /** Keeps each group's tabs together. `moved` joins the end of its group. */
@@ -581,7 +807,25 @@ export class BrowserWindowController implements TabHost {
     this.dropBrokenJoins()
     const order = arrangeGroups(this.tabs, this.currentGroups(), moved)
     if (order) this.tabs = order
+    this.joinSplits(moved)
     this.scheduleState()
+  }
+
+  /**
+   * Keeps each split's tabs next to each other, left then right as on screen, for the tab list to show as one row:
+   * where `moved` is, if it's one of them, else where the first of them is. Not for a pinned tab with an unpinned
+   * one, which the list shows in different places.
+   */
+  private joinSplits(moved?: Tab): void {
+    for (const { left, right } of this.splits) {
+      if (left.pinned !== right.pinned) continue
+      const at = this.tabs.indexOf(left)
+      if (this.tabs[at + 1] === right) continue
+      const anchor = moved === left || moved === right ? moved : at < this.tabs.indexOf(right) ? left : right
+      const before = this.tabs.slice(0, this.tabs.indexOf(anchor)).filter((t) => t !== left && t !== right)
+      const after = this.tabs.slice(this.tabs.indexOf(anchor)).filter((t) => t !== left && t !== right)
+      this.tabs = [...before, left, right, ...after]
+    }
   }
 
   /**
@@ -594,7 +838,8 @@ export class BrowserWindowController implements TabHost {
     const groups = this.currentGroups()
     for (const tab of this.tabs) {
       const joined = tab.joinedGroup
-      if (joined && !groups.has(tab) && !ungroupedSites.includes(joined) && !this.suspendedSites.has(joined)) tab.joinedGroup = null
+      // In a split it's out of groups for now, and goes back to the one it was in after.
+      if (joined && !groups.has(tab) && !this.splitOf(tab) && !ungroupedSites.includes(joined) && !this.suspendedSites.has(joined)) tab.joinedGroup = null
     }
   }
 
@@ -719,7 +964,7 @@ export class BrowserWindowController implements TabHost {
         this.win.setFullScreen(false)
       }
     }
-    this.layout()
+    this.showViews()
     this.scheduleState()
   }
 

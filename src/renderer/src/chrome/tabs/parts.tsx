@@ -6,15 +6,29 @@ import { hostOf } from '@shared/url'
 import { displayName, roomTitle, useSocial } from '../../social/SocialProvider'
 import { Avatar } from '../../ui/Avatar'
 import { copyText, MENU_SEPARATOR, popupMenu } from '../../ui/menu'
-import { cx, shortcut, siteIcon, timeAgo } from '../../ui/util'
+import { cx, shortcut, siteIcon, timeAgo, useFailingIcon } from '../../ui/util'
+import { tabDragStarted } from '../split-drag'
 import { useLinks, type SharedLink } from './links'
-import { CallButtons, CaptureSigns, hasMediaBar, MediaButton, MediaProgress, MuteButton } from './media'
+import { CallButtons, CallPeople, CaptureSigns, hasMediaBar, MediaButton, MediaProgress, MuteButton } from './media'
+
+/** What you can do with the tab's sound, call and player, between its icon and its name. */
+export function TabControls({ tab }: { tab: TabState }): ReactNode {
+  return (
+    <span className="tab-controls">
+      <MediaButton tab={tab} />
+      <MuteButton tab={tab} animated />
+      <CaptureSigns tab={tab} />
+      <CallButtons tab={tab} />
+      <CallPeople tab={tab} />
+    </span>
+  )
+}
 
 export function TabIcon({ tab }: { tab: TabState }): ReactNode {
-  const [broken, setBroken] = useState<string | null>(null)
+  const [failing, onError] = useFailingIcon(tab.favicon)
   if (tab.loading) return <span className="spinner" />
-  if (tab.favicon && broken !== tab.favicon) {
-    return <img className="favicon" src={tab.favicon} alt="" draggable={false} onError={() => setBroken(tab.favicon)} />
+  if (tab.favicon && !failing) {
+    return <img className="favicon" src={tab.favicon} alt="" draggable={false} onError={onError} />
   }
   return <Globe className="favicon" size={15} strokeWidth={1.75} />
 }
@@ -64,14 +78,15 @@ export function MarqueeText({ text, className }: { text: string; className: stri
 /** A site icon with the face of whoever sent the link in the corner, for links from two-person chats. */
 export function LinkIcon({ url, link, favicon }: { url: string; link?: SharedLink; favicon?: ReactNode }): ReactNode {
   const { people } = useSocial()
-  const [broken, setBroken] = useState(false)
+  const src = siteIcon(url)
+  const [failing, onError] = useFailingIcon(favicon ? null : src)
   return (
     <span className="link-icon">
       {favicon ??
-        (broken ? (
+        (failing || !src ? (
           <Globe className="favicon" size={15} strokeWidth={1.75} />
         ) : (
-          <img className="favicon" src={siteIcon(url)} alt="" draggable={false} onError={() => setBroken(true)} />
+          <img className="favicon" src={src} alt="" draggable={false} onError={onError} />
         ))}
       {link && link.oneOnOne && !link.mine && (
         <span className="link-icon-face">
@@ -220,17 +235,32 @@ export function TabItem({ tab, index, active, dragging, onDragStart, onDrop, sho
   const sent = chatLink?.createdAt ? `\n${chatLink.mine ? 'Sent' : 'Received'} ${formatWhen(chatLink.createdAt.getTime())}` : ''
   const opened = `Opened ${formatWhen(since)}${sent}`
   const style = color ? ({ '--group': color } as CSSProperties) : undefined
+  // It switches on click, not on press, so a tab dragged onto the page (for a split view) leaves the page you're on
+  // showing. The buttons in it stop the press, so clicking them doesn't switch.
+  const pressed = useRef(false)
   return (
     <div
       role="tab"
       aria-selected={active}
       title={tab.url ? `${tab.title}\n${tab.url}\n${opened}${tab.sleeping ? '\nSleeping to save memory' : ''}` : `${tab.title}\n${opened}`}
-      className={cx('tab', active && 'active', tab.pinned && 'pinned', dragging && 'dragging', tab.sleeping && 'sleeping', color && 'grouped', hasMediaBar(tab) && 'has-media', className)}
+      className={cx(
+        'tab',
+        active && 'active',
+        tab.onScreen && !active && 'on-screen',
+        tab.split && 'in-split',
+        tab.pinned && 'pinned',
+        dragging && 'dragging',
+        tab.sleeping && 'sleeping',
+        color && 'grouped',
+        hasMediaBar(tab) && 'has-media',
+        className
+      )}
       style={style}
       data-tab-id={tab.id}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = 'move'
+        pressed.current = false
         onDragStart()
       }}
       onDragOver={(e) => e.preventDefault()}
@@ -239,7 +269,11 @@ export function TabItem({ tab, index, active, dragging, onDragStart, onDrop, sho
         onDrop(index)
       }}
       onMouseDown={(e) => {
-        if (e.button === 0) tabs.activate(tab.id)
+        pressed.current = e.button === 0
+      }}
+      onClick={() => {
+        if (pressed.current) tabs.activate(tab.id)
+        pressed.current = false
       }}
       onAuxClick={(e) => {
         if (e.button === 1) tabs.close(tab.id)
@@ -250,20 +284,19 @@ export function TabItem({ tab, index, active, dragging, onDragStart, onDrop, sho
       }}
     >
       {link ? <LinkIcon url={tab.url} link={link} favicon={<TabIcon tab={tab} />} /> : <TabIcon tab={tab} />}
-      {!tab.pinned && <MarqueeText className="tab-title" text={tab.title} />}
-      {!tab.pinned && <span className="tab-age">{tabAge(since, now)}</span>}
-      {/* A pinned tab is just its icon, plus the mic in a call and mute while it plays. */}
+      {/* A pinned tab is just its icon, plus mute while it plays and the mic in a call. */}
       {tab.pinned ? (
         <>
-          <CallButtons tab={tab} micOnly />
           <MuteButton tab={tab} />
+          <CallButtons tab={tab} micOnly />
         </>
       ) : (
+        <TabControls tab={tab} />
+      )}
+      {!tab.pinned && <MarqueeText className="tab-title" text={tab.title} />}
+      {!tab.pinned && <span className="tab-age">{tabAge(since, now)}</span>}
+      {!tab.pinned && (
         <span className="tab-actions">
-          <CaptureSigns tab={tab} />
-          <CallButtons tab={tab} />
-          <MuteButton tab={tab} animated />
-          <MediaButton tab={tab} />
           <button
             className="tab-close"
             title={closeTitle ?? `Close tab (${shortcut('⌘W', 'Ctrl+W')})`}
@@ -318,6 +351,7 @@ export function useTabDrag(): TabDrag {
       onDragStart: () => {
         setDragGroup(null)
         setDragId(tab.id)
+        tabDragStarted(tab.id)
       },
       onDrop: drop
     })

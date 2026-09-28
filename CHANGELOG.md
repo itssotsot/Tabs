@@ -6,6 +6,12 @@ Written for friends, not developers. One "## <version>" section per release, new
 `npm run release` refuses to release a version without a section, and posts it as the GitHub release notes.
 -->
 
+## 0.0.2
+
+- **Split view: two tabs side by side.** Right-click a tab and choose **Open in Split View**, or drag a tab to one side of the page. The split button in the toolbar swaps the sides or closes it.
+- A split shows as one row in the tab list, with both of its tabs, and moves as one when you drag it.
+- In a Google Meet call, the call's tab shows the faces of the people in it. Hover over them for their names.
+
 ## 0.0.1
 
 The first version of Tabs, a browser that's better with friends.

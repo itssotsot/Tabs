@@ -4,7 +4,7 @@
 // which reads and presses its buttons. A call neither covers is muted by Tabs itself (see Tab.call).
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/api'
-import type { CallDevice, CallState } from '@shared/types'
+import type { CallDevice, CallState, PageCall } from '@shared/types'
 import type { PageSite } from './sites'
 
 /**
@@ -56,6 +56,9 @@ function watchCallActions(eventName: string): void {
   })
 }
 
+/** How often the people in a call are read again, for the stills from their cameras (see PageSite.call.people). */
+const PEOPLE_REFRESH_MS = 5000
+
 export function installCallControls(site?: PageSite): void {
   const fromSite = site?.call
   const eventName = `browserr-call-${Math.random().toString(36).slice(2)}`
@@ -72,7 +75,7 @@ export function installCallControls(site?: PageSite): void {
       const read = fromSite?.read() ?? null
       const mic = session.mic ?? read?.mic ?? null
       const camera = session.camera ?? read?.camera ?? null
-      const state: CallState | null = mic === null && camera === null ? null : { mic, camera }
+      const state: PageCall | null = mic === null && camera === null ? null : { mic, camera, people: fromSite?.people?.() ?? [] }
       const json = JSON.stringify(state)
       if (json === sent) return
       sent = json
@@ -97,6 +100,8 @@ export function installCallControls(site?: PageSite): void {
 
   // Observe the document itself: at preload time <html> may not exist yet.
   if (fromSite) new MutationObserver(report).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: fromSite.attributes })
+  // Cameras change without the page changing: the stills of people's faces are drawn again every so often.
+  if (fromSite?.people) setInterval(report, PEOPLE_REFRESH_MS)
 
   ipcRenderer.on(IPC.pageCallCommand, (_e, device: CallDevice) => {
     const bySession = device === 'mic' ? session.mic !== null : session.camera !== null

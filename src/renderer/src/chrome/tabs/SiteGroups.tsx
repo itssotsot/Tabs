@@ -3,15 +3,21 @@ import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type R
 import { defaultSiteColor } from '@shared/colors'
 import type { TabState, WindowState } from '@shared/types'
 import { hostOf } from '@shared/url'
-import { cx, siteIcon } from '../../ui/util'
+import { cx, siteIcon, useFailingIcon } from '../../ui/util'
 import { hasMediaBar } from './media'
 import { useStoredState, type TabDrag } from './parts'
 
-type Run = { tab: TabState } | { group: string; tabs: TabState[] }
+type Run = { tab: TabState } | { group: string; tabs: TabState[] } | { pair: [TabState, TabState] }
+
+/** The tabs a run shows, in order. */
+function runTabs(run: Run): TabState[] {
+  return 'tab' in run ? [run.tab] : 'pair' in run ? run.pair : run.tabs
+}
 
 /**
  * The site groups first, each with its tabs together, then the tabs in no group, all in strip order. A group
  * needs two of the tabs in `tabs`: a layout that shows some tabs elsewhere (in a chat's group) can leave a site with one.
+ * A split view's two tabs, which the window keeps next to each other and out of groups, are one run.
  */
 function siteRuns(tabs: TabState[]): Run[] {
   const members = new Map<string, TabState[]>()
@@ -27,7 +33,16 @@ function siteRuns(tabs: TabState[]): Run[] {
       groups.push({ group, tabs: members.get(group)! })
     }
   }
-  return [...groups, ...loose]
+  const joined: Run[] = []
+  for (let i = 0; i < loose.length; i++) {
+    const tab = (loose[i] as { tab: TabState }).tab
+    const next = (loose[i + 1] as { tab: TabState } | undefined)?.tab
+    if (tab.split?.side === 'left' && next && tab.split.with === next.id) {
+      joined.push({ pair: [tab, next] })
+      i++
+    } else joined.push(loose[i])
+  }
+  return [...groups, ...joined]
 }
 
 /** The site groups `tabs` shows as groups. */
@@ -42,11 +57,11 @@ export function useCollapsedSites(): [string[], (groups: string[]) => void] {
 
 /** The site's own icon: from one of its pages on the site itself (not, say, consent.youtube.com), else looked up. */
 function GroupIcon({ group, tabs }: { group: string; tabs: TabState[] }): ReactNode {
-  const [broken, setBroken] = useState<string | null>(null)
   const own = tabs.find((t) => t.favicon && hostOf(t.url) === group)
   const src = own?.favicon ?? siteIcon(`https://${group}/`)
-  if (!src || broken === src) return <Globe className="favicon" size={14} strokeWidth={1.75} />
-  return <img className="favicon" src={src} alt="" draggable={false} onError={() => setBroken(src)} />
+  const [failing, onError] = useFailingIcon(src)
+  if (!src || failing) return <Globe className="favicon" size={14} strokeWidth={1.75} />
+  return <img className="favicon" src={src} alt="" draggable={false} onError={onError} />
 }
 
 interface Props {
@@ -178,6 +193,21 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
   const runs = siteRuns(tabs)
   const items = runs.map((run) => {
     if ('tab' in run) return renderTab(run.tab)
+    if ('pair' in run) {
+      const [left, right] = run.pair
+      return (
+        <div
+          key={`split:${left.id}`}
+          role="group"
+          aria-label="Split view"
+          className={cx('tab-split', (left.onScreen || right.onScreen) && 'on-screen')}
+          data-split={left.id}
+        >
+          {renderTab(left)}
+          {renderTab(right)}
+        </div>
+      )
+    }
     const { group, tabs: members } = run
     const color = state.groupColors[group] ?? defaultSiteColor(group)
     const open = !collapsed.includes(group)
@@ -275,19 +305,20 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
     const list = el?.closest('.vtab-list')
     if (!draggedGroup || !el || !list) return null
     const over = el.dataset.group ?? shownIn.get(Number(el.dataset.tabId))
-    const index = runs.findIndex((r) => ('group' in r ? r.group === over : r.tab.id === Number(el.dataset.tabId)))
+    const index = runs.findIndex((r) => ('group' in r ? r.group === over : runTabs(r).some((t) => t.id === Number(el.dataset.tabId))))
     const from = runs.findIndex((r) => 'group' in r && r.group === draggedGroup)
     const run = runs[index]
     if (!run || index === from) return null
     // A group's wrapper has no box of its own (display: contents): it spans its chip and the tabs showing.
     const group = 'group' in run ? el.closest<HTMLElement>('.site-group') : null
-    const boxes = (group ? [...group.children] : [el]).map((c) => c.getBoundingClientRect()).filter((r) => r.height > 0)
+    const row = 'pair' in run ? el.closest<HTMLElement>('.tab-split') : null
+    const boxes = (group ? [...group.children] : [row ?? el]).map((c) => c.getBoundingClientRect()).filter((r) => r.height > 0)
     if (!boxes.length) return null
     const box = { top: Math.min(...boxes.map((r) => r.top)), bottom: Math.max(...boxes.map((r) => r.bottom)) }
     const after = e.clientY > (box.top + box.bottom) / 2
     // Right next to where it already is: nothing would move.
     if (index + (after ? 1 : 0) === from || index + (after ? 1 : 0) === from + 1) return null
-    const members = 'group' in run ? run.tabs : [run.tab]
+    const members = runTabs(run)
     const anchor = after ? members[members.length - 1] : members[0]
     const edge = after ? box.bottom + 0.5 : box.top - 0.5
     return { to: state.tabs.indexOf(anchor), into: null, place: after ? 'after' : 'before', top: edge - list.getBoundingClientRect().top }
@@ -298,12 +329,19 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
     const el = (e.target as Element).closest<HTMLElement>('[data-tab-id], [data-group]')
     const list = el?.closest('.vtab-list')
     if (!dragged || !el || !list) return null
-    const box = el.getBoundingClientRect()
     const group = el.dataset.group
+    // A split's row is one row: a tab goes above it or below it, never between its two tabs.
+    const pair = runs.find((r): r is { pair: [TabState, TabState] } => 'pair' in r && r.pair.some((t) => t.id === Number(el.dataset.tabId)))
+    const box = (pair ? el.closest<HTMLElement>('.tab-split')! : el).getBoundingClientRect()
+    const below = e.clientY > box.top + box.height / 2
     // On a chip it goes first in the group; on a tab, above or below it, in whatever group that tab is in.
-    const target = group ? tabs.find((t) => shownIn.get(t.id) === group) : tabs.find((t) => t.id === Number(el.dataset.tabId))
-    if (!target || target === dragged) return null
-    const after = !group && e.clientY > box.top + box.height / 2
+    const target = group
+      ? tabs.find((t) => shownIn.get(t.id) === group)
+      : pair
+        ? pair.pair[below ? 1 : 0]
+        : tabs.find((t) => t.id === Number(el.dataset.tabId))
+    if (!target || (target === dragged && !pair) || pair?.pair.includes(dragged)) return null
+    const after = !group && below
     const into = group ?? shownIn.get(target.id) ?? null
     const from = state.tabs.indexOf(dragged)
     const at = state.tabs.indexOf(target)
