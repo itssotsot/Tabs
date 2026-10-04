@@ -43,8 +43,11 @@ if (!app.isPackaged && process.env.BROWSERR_DEBUG_PORT) {
 }
 
 // Windows plays videos on a hardware overlay while nothing covers them. Each time a site's controls show or hide
-// over one, or it scrolls, Chromium moves it on or off the overlay, and it flashes dark.
-if (process.platform === 'win32') app.commandLine.appendSwitch('disable-direct-composition-video-overlays')
+// over one, or it scrolls, Chromium moves it on or off the overlay, and it flashes dark. So does every read of the
+// page's top colors (Tab.sampleColor): a page being captured can't use the overlay for that frame.
+// Chromium dropped the `disable-direct-composition-video-overlays` switch; its GPU workaround of the same name (with
+// underscores) still turns them off, and the GPU process is passed the workarounds' switches.
+if (process.platform === 'win32') app.commandLine.appendSwitch('disable_direct_composition_video_overlays')
 
 // If the terminal that launched us goes away, logging must not crash the app (EIO/EPIPE).
 for (const stream of [process.stdout, process.stderr]) stream.on('error', () => {})
