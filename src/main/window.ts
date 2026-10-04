@@ -13,7 +13,7 @@ import {
 } from '@shared/constants'
 import type { ChromeCommand, Insets, OmniboxAnchor, OverlayState, Rect, ShareDraft, SplitDragStart, Suggestion, TabLink, WindowState } from '@shared/types'
 import { pageKey } from '@shared/links'
-import { clampRatio, splitAfterDrop, splitRects, SPLIT_RADIUS, type SplitSide, type SplitState } from '@shared/split'
+import { clampRatio, splitAfterDrop, splitRects, type SplitSide, type SplitState } from '@shared/split'
 import { NEW_TAB_URL } from '@shared/url'
 import { browserEvents } from './browser-events'
 import { extensionHooks } from './extension-hooks'
@@ -245,7 +245,9 @@ export class BrowserWindowController implements TabHost {
     this.win.once('ready-to-show', () => this.win.show())
     this.colorTimer = setInterval(() => {
       // A fullscreen video hides the toolbar, so there's nothing to color.
-      if (this.win.isFocused() && this.active?.loaded && !this.fullscreenTab) void this.active.sampleColor()
+      // Both pages of a split: each has its own toolbar.
+      if (!this.win.isFocused() || this.fullscreenTab) return
+      for (const { tab } of this.shown) if (tab.loaded) void tab.sampleColor()
     }, COLOR_SAMPLE_MS)
     browserEvents.emit('window-created', this)
   }
@@ -406,7 +408,7 @@ export class BrowserWindowController implements TabHost {
       } else if (rects && split) {
         const r = rects[tab === split.left ? 'left' : 'right']
         view.setBounds({ x: area.x + r.x, y: area.y + r.y, width: r.width, height: r.height })
-        view.setBorderRadius(SPLIT_RADIUS)
+        view.setBorderRadius(0)
       } else {
         view.setBounds(area)
         view.setBorderRadius(0)
@@ -542,7 +544,11 @@ export class BrowserWindowController implements TabHost {
     browserEvents.emit('tab-opened', tab, opener, url)
   }
 
-  activate(tab: Tab): void {
+  /**
+   * Switches to the tab. `focusPage: false` leaves the keyboard where it is: in a split, clicking into the other
+   * page's toolbar (its address bar) makes that page the active one.
+   */
+  activate(tab: Tab, { focusPage = true }: { focusPage?: boolean } = {}): void {
     if (this.active === tab) return
     if (this.active) {
       this.active.liveWc?.stopFindInPage('clearSelection')
@@ -551,16 +557,16 @@ export class BrowserWindowController implements TabHost {
     tab.lastActiveAt = Date.now()
     this.active = tab
     this.showViews()
-    tab.wc.focus()
+    if (focusPage) tab.wc.focus()
     this.win.webContents.send(IPC.findState, { open: false, matches: 0, activeMatch: 0 })
     this.scheduleState()
     void tab.sampleColor()
     this.showPrompt()
   }
 
-  activateById(id: number): void {
+  activateById(id: number, focusPage = true): void {
     const tab = this.tabs.find((t) => t.id === id)
-    if (tab) this.activate(tab)
+    if (tab) this.activate(tab, { focusPage })
   }
 
   closeTab(tab: Tab): void {
@@ -698,6 +704,15 @@ export class BrowserWindowController implements TabHost {
     else this.activate(focus)
     // Their row goes where the tab that was already there is, and out of its site's group.
     this.arrange(focus === left ? right : left)
+  }
+
+  /** A tab dropped on a side of another in the tab list: the two side by side, it on that side, and you on it. */
+  splitWith(id: number, targetId: number, side: SplitSide): void {
+    const tab = this.tabById(id)
+    const target = this.tabById(targetId)
+    if (!tab || !target || tab === target) return
+    if (side === 'left') this.setSplit(tab, target, 0.5, tab)
+    else this.setSplit(target, tab, 0.5, tab)
   }
 
   /** Shows `tab` beside the page you're looking at (on the right), from its menu. */
@@ -935,7 +950,7 @@ export class BrowserWindowController implements TabHost {
   }
 
   onTabEdge(tab: Tab, edge: { color: string; edge: string[] }): void {
-    if (tab === this.active && !this.win.isDestroyed()) this.win.webContents.send(IPC.pageEdge, { tabId: tab.id, ...edge })
+    if (this.isShown(tab) && !this.win.isDestroyed()) this.win.webContents.send(IPC.pageEdge, { tabId: tab.id, ...edge })
   }
 
   onTabUpdated(tab: Tab): void {

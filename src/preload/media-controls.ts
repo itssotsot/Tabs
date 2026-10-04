@@ -32,7 +32,8 @@ function handOverHiddenMedia(eventName: string): void {
 
 /**
  * The player is whatever plays with sound: muted media are previews, backgrounds and feeds until they're
- * unmuted. A site can pick its player instead, and seek it its own way (see PageSite).
+ * unmuted, and a call's live streams are no player. A site can pick its player instead, and seek it its own way
+ * (see PageSite).
  */
 export function installMediaControls(site?: PageSite): void {
   let video: HTMLMediaElement | null = null
@@ -68,7 +69,10 @@ export function installMediaControls(site?: PageSite): void {
   }
 
   const isPlayer = (target: EventTarget | null): target is HTMLMediaElement =>
-    target instanceof HTMLMediaElement && (site?.player ? target.matches(site.player) : !target.muted && target.volume > 0)
+    target instanceof HTMLMediaElement &&
+    // A live stream is a call (the others' voices and cameras, or your own camera), not something to pause or seek.
+    !(target.srcObject instanceof MediaStream) &&
+    (site?.player ? target.matches(site.player) : !target.muted && target.volume > 0)
 
   const pick = (target: EventTarget | null): void => {
     if (!isPlayer(target)) return

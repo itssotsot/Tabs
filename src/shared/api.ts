@@ -56,6 +56,7 @@ export const IPC = {
   splitResize: 'split:resize',
   splitClose: 'split:close',
   splitSwap: 'split:swap',
+  splitPair: 'split:pair',
   navigate: 'nav:navigate',
   navBack: 'nav:back',
   navForward: 'nav:forward',
@@ -210,7 +211,8 @@ export interface BrowserrAPI {
   tabs: {
     create(url?: string): void
     close(id: number): void
-    activate(id: number): void
+    /** `focusPage: false` keeps the keyboard in the browser UI (the toolbar of a split's page, say). */
+    activate(id: number, focusPage?: boolean): void
     /** `into` is the site group it was dropped in, or null for none. Without it, the window works that out. */
     move(id: number, toIndex: number, into?: string | null): void
     /** Shows a collapsed group's tabs in a panel beside `anchor` (its chip, in window coordinates). */
@@ -246,6 +248,8 @@ export interface BrowserrAPI {
     /** Back to one page: the one you were using. */
     close(): void
     swap(): void
+    /** A tab dropped on a side of another in the tab list: the two side by side, it on that side. */
+    pair(tabId: number, targetId: number, side: SplitSide): void
   }
   nav: {
     go(input: string): void

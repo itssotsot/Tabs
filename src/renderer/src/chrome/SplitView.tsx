@@ -39,8 +39,7 @@ function useSize(ref: RefObject<HTMLElement | null>): { width: number; height: n
 }
 
 /**
- * Where the page goes (the main process puts it there, over this). A split view's divider and the ring around the
- * page you're using show around its pages. While a tab is dragged, pictures of the pages stand in for them, and
+ * Where the page goes (the main process puts it there, over this). A split view's divider shows between its pages. While a tab is dragged, pictures of the pages stand in for them, and
  * move aside to make room for it on the side you're over.
  */
 export function Viewport({ state }: { state: WindowState }): ReactNode {
@@ -158,33 +157,21 @@ export function Viewport({ state }: { state: WindowState }): ReactNode {
   const activeSplit = state.htmlFullscreen ? undefined : state.splits.find((s) => s.left === state.activeTabId || s.right === state.activeTabId)
   return (
     <div ref={ref} className="viewport">
-      {activeSplit && width > 0 && <SplitFrame split={activeSplit} activeTabId={state.activeTabId} width={width} height={height} />}
+      {activeSplit && width > 0 && <SplitFrame split={activeSplit} width={width} height={height} />}
       {drag && width > 0 && <Stage drag={drag} tabs={state.tabs} width={width} height={height} />}
     </div>
   )
 }
 
-// ---- the split on screen: the ring around the page you're using, and the divider between them ----
+// ---- the split on screen: the divider between its pages ----
 
-function SplitFrame({ split, activeTabId, width, height }: { split: SplitState; activeTabId: number | null; width: number; height: number }): ReactNode {
+function SplitFrame({ split, width, height }: { split: SplitState; width: number; height: number }): ReactNode {
   const api = window.browserr
   // While the divider is dragged, where it is, ahead of the window's state.
   const [live, setLive] = useState<number | null>(null)
   const rects = splitRects(width, height, live ?? split.ratio)
-  const focused = rects[split.left === activeTabId ? 'left' : 'right']
-  const ring = SPLIT_PAD / 2
   return (
     <div className={cx('split-frame', live !== null && 'resizing')}>
-      <div
-        className="split-ring"
-        style={{
-          left: focused.x - ring,
-          top: focused.y - ring,
-          width: focused.width + ring * 2,
-          height: focused.height + ring * 2,
-          borderRadius: SPLIT_RADIUS + ring
-        }}
-      />
       <div
         className={cx('split-divider', live !== null && 'dragging')}
         style={{ left: rects.left.x + rects.left.width, width: SPLIT_PAD }}
@@ -197,7 +184,7 @@ function SplitFrame({ split, activeTabId, width, height }: { split: SplitState; 
           let frame = 0
           let ratio = split.ratio
           const move = (ev: PointerEvent): void => {
-            ratio = clampRatio((ev.clientX - left - SPLIT_PAD * 1.5) / (width - SPLIT_PAD * 3), width)
+            ratio = clampRatio((ev.clientX - left - SPLIT_PAD / 2) / (width - SPLIT_PAD), width)
             setLive(ratio)
             if (!frame) {
               frame = requestAnimationFrame(() => {
@@ -255,10 +242,10 @@ function stageBoxes(drag: StageDrag, width: number, height: number): { boxes: Bo
     boxes.push({ tabId, rect, radius, picture: pictures.get(tabId), incoming: tabId === dragged, hidden, side })
   }
   if (next && rects) {
-    box(next.left, rects.left, SPLIT_RADIUS, false, 'left')
-    box(next.right, rects.right, SPLIT_RADIUS, false, 'right')
+    box(next.left, rects.left, 0, false, 'left')
+    box(next.right, rects.right, 0, false, 'right')
   }
-  for (const pane of start.panes) box(pane.tabId, pane.rect, start.split ? SPLIT_RADIUS : 0, !!next, null)
+  for (const pane of start.panes) box(pane.tabId, pane.rect, 0, !!next, null)
   // Waiting in the middle for a side to go to.
   const middle = { x: width * 0.25, y: height * 0.2, width: width * 0.5, height: height * 0.6 }
   box(dragged, middle, SPLIT_RADIUS, true, null)

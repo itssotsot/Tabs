@@ -6,6 +6,13 @@ Written for friends, not developers. One "## <version>" section per release, new
 `npm run release` refuses to release a version without a section, and posts it as the GitHub release notes.
 -->
 
+## 0.0.4
+
+- **YouTube videos play again.** The ad blocker now keeps its lists up to date by itself, so YouTube can't tell it's there. If YouTube still refuses a video, you'll see its message instead of an empty player.
+- In split view, each page has its own toolbar, and the two pages fill the window with a thin divider between them.
+- In the sidebar, drop a tab onto another tab to open the two side by side.
+- In a video call, the tab's play and pause button no longer treats the call as something to pause.
+
 ## 0.0.3
 
 - On Windows, videos no longer flicker.

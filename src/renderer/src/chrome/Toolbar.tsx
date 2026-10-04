@@ -1,6 +1,7 @@
 import { ArrowDownToLine, ArrowLeft, ArrowRight, CircleArrowUp, Columns2, MoreVertical } from 'lucide-react'
-import type { ReactNode } from 'react'
-import type { DownloadState, SidebarPanel, ToolbarExtension, UpdateReady, WindowState } from '@shared/types'
+import type { CSSProperties, ReactNode } from 'react'
+import { SPLIT_PAD } from '@shared/split'
+import type { Bookmark, DownloadState, SidebarPanel, TabState, ToolbarExtension, UpdateReady, WindowState } from '@shared/types'
 import { useSocial } from '../social/SocialProvider'
 import { Avatar } from '../ui/Avatar'
 import { popupMenu } from '../ui/menu'
@@ -10,14 +11,17 @@ import { Omnibox } from './Omnibox'
 
 interface Props {
   state: WindowState
+  bookmarks: Bookmark[]
   downloads: DownloadState[]
   update: UpdateReady | null
   sidebar: SidebarPanel | null
   onToggleSidebar: (panel: SidebarPanel) => void
   extensions: ToolbarExtension[]
+  /** How wide the open sidebar is, which a split's right page doesn't reach under. */
+  sidebarWidth: number
 }
 
-export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar, extensions }: Props): ReactNode {
+export function Toolbar({ state, bookmarks, downloads, update, sidebar, onToggleSidebar, extensions, sidebarWidth }: Props): ReactNode {
   const api = window.browserr
   const { user, profile, unreadCount, incoming } = useSocial()
   const tab = state.tabs.find((t) => t.id === state.activeTabId) ?? null
@@ -28,17 +32,25 @@ export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar, ex
     ? active.reduce((sum, d) => sum + d.receivedBytes, 0) / Math.max(1, active.reduce((sum, d) => sum + d.totalBytes, 0))
     : 0
 
-  return (
-    <div className="toolbar">
-      <button className="icon-btn" disabled={!tab?.canGoBack} title="Back" onClick={() => api.nav.back()}>
+  // What's the page's own: back, forward and its address bar.
+  const pageControls = (page: TabState | null): ReactNode => (
+    <>
+      <button className="icon-btn" disabled={!page?.canGoBack} title="Back" onClick={() => api.nav.back()}>
         <ArrowLeft size={17} />
       </button>
-      <button className="icon-btn" disabled={!tab?.canGoForward} title="Forward" onClick={() => api.nav.forward()}>
+      <button className="icon-btn" disabled={!page?.canGoForward} title="Forward" onClick={() => api.nav.forward()}>
         <ArrowRight size={17} />
       </button>
+      <Omnibox
+        tab={page}
+        active={!page || page.id === state.activeTabId}
+        isBookmarked={!page || page.id === state.activeTabId ? state.isBookmarked : bookmarks.some((b) => b.url === page.url)}
+      />
+    </>
+  )
 
-      <Omnibox tab={tab} isBookmarked={state.isBookmarked} />
-
+  const windowControls = (
+    <>
       {tab?.split && (
         <button
           className="icon-btn split-btn"
@@ -102,6 +114,43 @@ export function Toolbar({ state, downloads, update, sidebar, onToggleSidebar, ex
       >
         <MoreVertical size={17} />
       </button>
+    </>
+  )
+
+  // In a split view each page has its own toolbar above it, ending where the page does. The window's buttons
+  // are at the end of the right one.
+  const split = !state.htmlFullscreen && tab?.split ? state.splits.find((s) => s.left === tab.id || s.right === tab.id) : undefined
+  const pages = split && ([split.left, split.right].map((id) => state.tabs.find((t) => t.id === id)) as (TabState | undefined)[])
+  if (!split || !pages?.[0] || !pages[1]) {
+    return (
+      <div className="toolbar">
+        {pageControls(tab)}
+        {windowControls}
+      </div>
+    )
+  }
+  // As in splitRects: the left page's width.
+  const leftWidth = `calc((100% - ${sidebarWidth + SPLIT_PAD}px) * ${split.ratio})`
+  return (
+    <div className="toolbar split" style={{ '--split-left': leftWidth } as CSSProperties}>
+      {pages.map((page, i) => {
+        // Using the other page's toolbar makes it the active tab, first, so what it does goes to its page.
+        const use = (): void => {
+          if (page!.id !== state.activeTabId) api.tabs.activate(page!.id, false)
+        }
+        return (
+          <div
+            key={i === 0 ? 'left' : 'right'}
+            className={cx('toolbar-pane', i === 0 ? 'left' : 'right')}
+            data-tab-id={page!.id}
+            onMouseDownCapture={use}
+            onFocusCapture={use}
+          >
+            {pageControls(page!)}
+            {i === 1 && windowControls}
+          </div>
+        )
+      })}
     </div>
   )
 }

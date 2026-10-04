@@ -248,6 +248,8 @@ export interface OmniboxAnchor {
   /** How wide the toolbar's buttons before and after the bar are, gaps between them included. */
   before: number
   after: number
+  /** How wide the toolbar is. In a split view each page has its own, which ends at the divider. */
+  width: number
   /** CSS colors, as the address bar's own background and text. */
   background: string
   foreground: string

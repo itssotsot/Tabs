@@ -10,28 +10,29 @@ export interface SplitState {
   ratio: number
 }
 
-/** Room around each page of a split, where the divider and the ring around the page you're using show. */
+/**
+ * The gap between the pages of a split, where the divider is. Otherwise they fill the page area, like one page,
+ * meeting the toolbar above them.
+ */
 export const SPLIT_PAD = 6
-/** The pages of a split have rounded corners, like cards. */
+/** Pages waiting, while a tab is dragged, have rounded corners, like cards. */
 export const SPLIT_RADIUS = 10
 /** Neither page gets narrower than this, dragging the divider. */
 export const SPLIT_MIN_WIDTH = 280
 
 /** Where the two pages go in the page area (`width` × `height`), relative to its top left. */
 export function splitRects(width: number, height: number, ratio: number): Record<SplitSide, Rect> {
-  const inner = Math.max(0, width - SPLIT_PAD * 3)
+  const inner = Math.max(0, width - SPLIT_PAD)
   const leftWidth = Math.round(inner * clampRatio(ratio, width))
-  const y = SPLIT_PAD
-  const h = Math.max(0, height - SPLIT_PAD * 2)
   return {
-    left: { x: SPLIT_PAD, y, width: leftWidth, height: h },
-    right: { x: SPLIT_PAD * 2 + leftWidth, y, width: inner - leftWidth, height: h }
+    left: { x: 0, y: 0, width: leftWidth, height },
+    right: { x: leftWidth + SPLIT_PAD, y: 0, width: inner - leftWidth, height }
   }
 }
 
 /** Keeps both pages at least SPLIT_MIN_WIDTH wide, when the area has room for that. */
 export function clampRatio(ratio: number, width: number): number {
-  const inner = width - SPLIT_PAD * 3
+  const inner = width - SPLIT_PAD
   const min = inner > SPLIT_MIN_WIDTH * 2 ? SPLIT_MIN_WIDTH / inner : 0.5
   return Math.min(1 - min, Math.max(min, Number.isFinite(ratio) ? ratio : 0.5))
 }

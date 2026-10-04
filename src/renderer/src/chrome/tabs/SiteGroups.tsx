@@ -1,11 +1,12 @@
 import { ChevronRight, Globe } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react'
 import { defaultSiteColor } from '@shared/colors'
+import type { SplitSide } from '@shared/split'
 import type { TabState, WindowState } from '@shared/types'
 import { hostOf } from '@shared/url'
 import { cx, siteIcon, useFailingIcon } from '../../ui/util'
 import { hasMediaBar } from './media'
-import { useStoredState, type TabDrag } from './parts'
+import { TabIcon, useStoredState, type TabDrag } from './parts'
 
 type Run = { tab: TabState } | { group: string; tabs: TabState[] } | { pair: [TabState, TabState] }
 
@@ -143,7 +144,18 @@ interface Drop {
   place?: 'before' | 'after'
   /** Where the line goes, from the top of the list. */
   top: number
+  /**
+   * Dropped onto another tab instead: the two side by side, in a split view. Where the dragged tab would go in that
+   * tab's row, from the list's top left.
+   */
+  split?: { target: number; side: SplitSide; left: number; width: number; height: number }
 }
+
+/**
+ * How much of a tab, at its top and at its bottom, is for moving another tab above or below it. Dropped between
+ * those, onto the tab itself, the two make a split view: on the half of it the pointer is over.
+ */
+const MOVE_BAND = 0.28
 
 /** How long a dragged tab stays over a collapsed group before the group opens. */
 const EXPAND_DELAY = 1500
@@ -324,11 +336,26 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
     return { to: state.tabs.indexOf(anchor), into: null, place: after ? 'after' : 'before', top: edge - list.getBoundingClientRect().top }
   }
 
+  // Onto another tab, away from its top and bottom: side by side with it, on the half the pointer is over.
+  const splitDropAt = (e: DragEvent<HTMLElement>, el: HTMLElement, list: Element): Drop | null => {
+    const over = el.dataset.tabId ? tabs.find((t) => t.id === Number(el.dataset.tabId)) : undefined
+    if (!over || !dragged || over === dragged) return null
+    const r = el.getBoundingClientRect()
+    const band = r.height * MOVE_BAND
+    if (e.clientY < r.top + band || e.clientY > r.bottom - band) return null
+    const side: SplitSide = e.clientX < r.left + r.width / 2 ? 'left' : 'right'
+    const l = list.getBoundingClientRect()
+    const left = r.left - l.left + (side === 'right' ? r.width / 2 : 0)
+    return { to: -1, into: null, top: r.top - l.top, split: { target: over.id, side, left, width: r.width / 2, height: r.height } }
+  }
+
   const dropAt = (e: DragEvent<HTMLElement>): Drop | null => {
     if (draggedGroup) return groupDropAt(e)
     const el = (e.target as Element).closest<HTMLElement>('[data-tab-id], [data-group]')
     const list = el?.closest('.vtab-list')
     if (!dragged || !el || !list) return null
+    const beside = splitDropAt(e, el, list)
+    if (beside) return beside
     const group = el.dataset.group
     // A split's row is one row: a tab goes above it or below it, never between its two tabs.
     const pair = runs.find((r): r is { pair: [TabState, TabState] } => 'pair' in r && r.pair.some((t) => t.id === Number(el.dataset.tabId)))
@@ -365,7 +392,8 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
           if (over !== overGroup) setOverGroup(over)
         }
         const next = dropAt(e)
-        if (next?.to !== drop?.to || next?.into !== drop?.into || next?.top !== drop?.top) setDrop(next)
+        const moved = next?.to !== drop?.to || next?.into !== drop?.into || next?.top !== drop?.top
+        if (moved || next?.split?.target !== drop?.split?.target || next?.split?.side !== drop?.split?.side) setDrop(next)
       }}
       onDragLeave={(e) => {
         if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
@@ -377,7 +405,8 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
         e.preventDefault()
         e.stopPropagation()
         // Where the line is, so it lands exactly where it said it would.
-        if (drop && dragged) window.browserr.tabs.move(dragged.id, drop.to, drop.into)
+        if (drop?.split && dragged) window.browserr.split.pair(dragged.id, drop.split.target, drop.split.side)
+        else if (drop && dragged) window.browserr.tabs.move(dragged.id, drop.to, drop.into)
         if (drop && draggedGroup) window.browserr.tabs.moveGroup(draggedGroup, drop.to, drop.place)
         setDrop(null)
         setOverGroup(null)
@@ -385,7 +414,20 @@ export function SiteGroupedTabs({ state, tabs, drag, collapsed, setCollapsed, re
       }}
     >
       {items}
-      {(dragged || draggedGroup) && drop && (
+      {dragged && drop?.split && (
+        <>
+          {/* The tab it's dropped beside makes room, as if they were already one row. */}
+          <style>{`.vtab-list .tab[data-tab-id="${drop.split.target}"] { padding-${drop.split.side}: calc(50% + 10px); box-shadow: inset 0 0 0 1px var(--border); }`}</style>
+          <div
+            className={cx('split-drop', drop.split.side)}
+            style={{ left: drop.split.left, top: drop.top, width: drop.split.width, height: drop.split.height }}
+          >
+            <TabIcon tab={dragged} />
+            <span className="split-drop-title">{dragged.title}</span>
+          </div>
+        </>
+      )}
+      {(dragged || draggedGroup) && drop && !drop.split && (
         <div
           className={cx('drop-line', drop.into && 'grouped')}
           style={{ top: drop.top, '--group': drop.into ? (state.groupColors[drop.into] ?? defaultSiteColor(drop.into)) : undefined } as CSSProperties}

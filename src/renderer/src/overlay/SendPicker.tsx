@@ -319,7 +319,7 @@ export function SendPicker({ draft, more = [], anchor, windowWidth }: Props): Re
         <div style={{ flex: 'none', width: anchor.left }} />
         <div className="chrome-main">
           <div style={{ flex: 'none', height: anchor.top }} />
-          <div className="toolbar">
+          <div className="toolbar" style={{ width: anchor.width }}>
             {anchor.before > 0 && <div style={{ flex: 'none', width: anchor.before }} />}
             <div className="omnibox">
               <div className="picker-tray" style={{ '--panel-bg': anchor.background, '--panel-fg': anchor.foreground } as CSSProperties}>

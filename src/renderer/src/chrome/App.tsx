@@ -8,6 +8,7 @@ import type {
   Settings,
   SidebarPanel,
   TabLayout,
+  TabState,
   ToolbarExtension,
   UpdateReady,
   WindowState
@@ -171,26 +172,43 @@ export function App(): ReactNode {
   // re-rendering the browser UI. The tab's state has them too, for when you switch tabs.
   // Only in themes that follow the page's color; the others keep their own.
   const activeTab = state.tabs.find((t) => t.id === activeTabId)
-  // Two pages side by side: one page's top edge would stretch across both, so the toolbar takes just its color.
-  const split = !!activeTab?.split
-  const liveEdge = useRef<PageEdge | null>(null)
+  // In a split view each page's toolbar takes that page's colors (see Toolbar); the rest of the header, the
+  // active one's main color. One page's top edge would stretch across both.
+  const split = !!activeTab?.split && !state.htmlFullscreen
+  const onScreen = state.tabs.filter((t) => t.onScreen)
+  const liveEdges = useRef(new Map<number, PageEdge>())
   const paintEdge = useRef<() => void>(() => {})
   paintEdge.current = () => {
     const header = headerRef.current
     if (!header) return
-    if (!followsPage) return applyPageEdge(header, null, null, 0)
-    const live = liveEdge.current?.tabId === activeTabId ? liveEdge.current : null
-    const color = live?.color ?? activeTab?.color ?? null
-    applyPageEdge(header, color, split ? null : (live?.edge ?? activeTab?.edge ?? null), sidebarWidth)
+    const panes = [...header.querySelectorAll<HTMLElement>('.toolbar-pane[data-tab-id]')]
+    if (!followsPage) {
+      for (const el of [header, ...panes]) applyPageEdge(el, null, null, 0)
+      return
+    }
+    const colorsOf = (tab: TabState | undefined): { color: string | null; edge: string[] | null } => {
+      const live = tab && liveEdges.current.get(tab.id)
+      return { color: live?.color ?? tab?.color ?? null, edge: live?.edge ?? tab?.edge ?? null }
+    }
+    const active = colorsOf(activeTab)
+    applyPageEdge(header, active.color, split ? null : active.edge, sidebarWidth)
+    for (const el of panes) {
+      const page = colorsOf(state.tabs.find((t) => t.id === Number(el.dataset.tabId)))
+      applyPageEdge(el, page.color, page.edge, el.classList.contains('right') ? sidebarWidth : 0)
+    }
   }
+  // What was read of a page stops counting once it's off screen: the tab's state has it when it's back.
+  const onScreenKey = onScreen.map((t) => t.id).join()
   useLayoutEffect(() => {
-    liveEdge.current = null
-  }, [activeTabId])
-  useLayoutEffect(() => paintEdge.current(), [activeTabId, activeTab?.color, activeTab?.edge, sidebarWidth, followsPage, split])
+    const shown = new Set(onScreen.map((t) => t.id))
+    for (const id of liveEdges.current.keys()) if (!shown.has(id)) liveEdges.current.delete(id)
+  }, [onScreenKey])
+  const colorsKey = JSON.stringify(onScreen.map((t) => [t.id, t.color, t.edge]))
+  useLayoutEffect(() => paintEdge.current(), [activeTabId, colorsKey, sidebarWidth, followsPage, split, state.splits])
   useEffect(
     () =>
       api.onPageEdge((edge) => {
-        liveEdge.current = edge
+        liveEdges.current.set(edge.tabId, edge)
         paintEdge.current()
       }),
     []
@@ -216,6 +234,8 @@ export function App(): ReactNode {
             {layout === 'groups' && <GroupsStrip state={state} layout={layout} onOpenRoom={openRoom} />}
             <Toolbar
               state={state}
+              bookmarks={bookmarks}
+              sidebarWidth={sidebarWidth}
               downloads={downloads}
               update={update}
               sidebar={sidebar}

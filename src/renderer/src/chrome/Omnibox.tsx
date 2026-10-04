@@ -12,10 +12,17 @@ function displayUrl(url: string): string {
 interface Props {
   tab: TabState | null
   isBookmarked: boolean
+  /**
+   * The active tab's bar. In a split view each page has its own; the other page's bar just shows where it is until
+   * it's clicked, which makes its page the active one.
+   */
+  active?: boolean
 }
 
-export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
+export function Omnibox({ tab, isBookmarked, active = true }: Props): ReactNode {
   const api = window.browserr
+  const activeRef = useRef(active)
+  activeRef.current = active
   const inputRef = useRef<HTMLInputElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(false)
@@ -37,11 +44,12 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
   const reportedAnchor = useRef('')
   const reportAnchor = useRef(() => {})
   reportAnchor.current = () => {
+    // Only the active tab's bar, which the send picker grows out of. The other reports again once it's active.
+    if (!active) return void (reportedAnchor.current = '')
     const el = wrapRef.current
     const toolbar = el?.parentElement
-    const main = el?.closest('.chrome-main')
     const chrome = el?.closest('.chrome')
-    if (!el || !toolbar || !main || !chrome) return
+    if (!el || !toolbar || !chrome) return
     const items = [...toolbar.children]
     const at = items.indexOf(el)
     const span = (group: Element[]): number =>
@@ -49,8 +57,9 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
     const style = getComputedStyle(el)
     const anchor = {
       chromeClass: chrome.className,
-      left: main.getBoundingClientRect().left,
+      left: toolbar.getBoundingClientRect().left,
       top: toolbar.getBoundingClientRect().top,
+      width: toolbar.getBoundingClientRect().width,
       before: span(items.slice(0, at)),
       after: span(items.slice(at + 1)),
       // The variables rather than the used colors, which may be mid-hover.
@@ -78,6 +87,11 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
     }
   }, [])
 
+  // The send picker grows out of the active tab's bar only.
+  useEffect(() => {
+    if (!active) setExpanded(false)
+  }, [active])
+
   // Show the page URL unless the user is mid-edit.
   useEffect(() => {
     if (!dirty) setText(focused ? tabUrl : displayUrl(tabUrl))
@@ -92,6 +106,7 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
   useEffect(
     () =>
       api.onCommand((cmd) => {
+        if (!activeRef.current) return
         if (cmd.type === 'send-picker') return setExpanded(cmd.open)
         if (cmd.type !== 'focus-omnibox') return
         inputRef.current?.focus()
@@ -103,6 +118,7 @@ export function Omnibox({ tab, isBookmarked }: Props): ReactNode {
   useEffect(
     () =>
       api.omnibox.onPick((index) => {
+        if (!activeRef.current) return
         const item = suggestions.current.items[index]
         if (item) go(item.url)
       }),

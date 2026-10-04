@@ -18,8 +18,15 @@ function latest<T>(channel: string): (cb: (payload: T) => void) => Unsubscribe {
   let last: { payload: T } | null = null
   ipcRenderer.on(channel, (_e, payload: T) => (last = { payload }))
   return (cb) => {
-    if (last) cb(last.payload)
-    return on(channel, cb)
+    // Just after subscribing returns, so a callback can already use what it returned; not if a newer one came first.
+    const known = last
+    let subscribed = true
+    if (known) queueMicrotask(() => subscribed && last === known && cb(known.payload))
+    const off = on(channel, cb)
+    return () => {
+      subscribed = false
+      off()
+    }
   }
 }
 
@@ -31,7 +38,7 @@ const api: BrowserrAPI = {
   tabs: {
     create: (url) => ipcRenderer.send(IPC.tabCreate, url),
     close: (id) => ipcRenderer.send(IPC.tabClose, id),
-    activate: (id) => ipcRenderer.send(IPC.tabActivate, id),
+    activate: (id, focusPage) => ipcRenderer.send(IPC.tabActivate, id, focusPage),
     move: (id, toIndex, into) => ipcRenderer.send(IPC.tabMove, id, toIndex, into),
     moveGroup: (group, toIndex, place) => ipcRenderer.send(IPC.tabMoveGroup, group, toIndex, place),
     peekGroup: (group, anchor) => ipcRenderer.send(IPC.tabPeekGroup, group, anchor),
@@ -49,7 +56,8 @@ const api: BrowserrAPI = {
     finish: (tabId, side) => ipcRenderer.invoke(IPC.splitFinish, tabId, side),
     resize: (ratio) => ipcRenderer.send(IPC.splitResize, ratio),
     close: () => ipcRenderer.send(IPC.splitClose),
-    swap: () => ipcRenderer.send(IPC.splitSwap)
+    swap: () => ipcRenderer.send(IPC.splitSwap),
+    pair: (tabId, targetId, side) => ipcRenderer.send(IPC.splitPair, tabId, targetId, side)
   },
   nav: {
     go: (input) => ipcRenderer.send(IPC.navigate, input),

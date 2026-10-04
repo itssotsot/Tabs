@@ -82,24 +82,9 @@ kbd {
   /* How pages move in a split view. Keep --split-move in step with MOVE_MS in SplitView.tsx. */
   --split-move: 0.34s;
   --split-ease: cubic-bezier(0.2, 0.9, 0.25, 1);
-  --split-ring: color-mix(in srgb, var(--accent) 80%, transparent);
 }
 
 /* ---------- split view (SplitView.tsx) ---------- */
-
-/* Around the page you're using, in the room around it. It slides across when you click into the other page. */
-.split-ring {
-  position: absolute;
-  pointer-events: none;
-  border: 2px solid var(--split-ring);
-  transition:
-    left 0.28s var(--split-ease),
-    width 0.28s var(--split-ease);
-}
-
-.split-frame.resizing .split-ring {
-  transition: none;
-}
 
 .split-divider {
   position: absolute;
@@ -183,7 +168,7 @@ html.resizing-split * {
   pointer-events: none;
 }
 
-/* The tab dragged in glows, then settles into the ring of the page you're using. */
+/* The tab dragged in glows until it's dropped. */
 .split-box.incoming {
   z-index: 1;
 }
@@ -192,12 +177,6 @@ html.resizing-split * {
   box-shadow:
     0 0 0 2px var(--accent),
     0 18px 50px var(--accent-soft);
-}
-
-.split-stage.dropped .split-box.incoming {
-  box-shadow:
-    0 0 0 1px var(--bg-raised),
-    0 0 0 3px var(--split-ring);
 }
 
 .split-card {
@@ -286,7 +265,6 @@ html.resizing-split * {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .split-ring,
   .split-stage,
   .split-box,
   .split-stage-divider,
@@ -3523,6 +3501,61 @@ html.resizing-vtabs * {
   height: 34px;
   border-radius: 8px;
   padding: 0 6px 0 10px;
+  /* Padding moves when another tab is dragged beside it, to make a split (.split-drop). */
+  transition:
+    background 0.12s,
+    padding 0.2s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+/* A tab dragged to an end of another: where it'll go, beside it in one row, as a split view (SiteGroups.tsx). */
+.split-drop {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-input));
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--text);
+  pointer-events: none;
+  animation: split-drop-in 0.2s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+  /* Across to the other half as the pointer crosses the middle of the tab. */
+  transition:
+    left 0.2s cubic-bezier(0.2, 0.9, 0.25, 1),
+    border-radius 0.2s ease;
+}
+
+.split-drop.left {
+  border-radius: 8px 0 0 8px;
+  transform-origin: left center;
+}
+
+.split-drop.right {
+  border-radius: 0 8px 8px 0;
+  transform-origin: right center;
+}
+
+.split-drop-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@keyframes split-drop-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .split-drop {
+    animation: none;
+  }
 }
 
 .vtab-list .tab .media-bar {
@@ -3594,6 +3627,12 @@ html.resizing-vtabs * {
   padding: 0 4px 0 10px;
 }
 
+/* One half with a video's progress bar makes the row taller: both halves grow alike, so they stay level. */
+.vtab-list .tab-split:has(> .tab.has-media) > .tab {
+  height: 42px;
+  padding-bottom: 6px;
+}
+
 .vtab-list .tab-split > .tab:first-child {
   border-radius: 8px 0 0 8px;
 }
@@ -3602,20 +3641,20 @@ html.resizing-vtabs * {
   border-radius: 0 8px 8px 0;
 }
 
+/* On screen, the row is one tab you're on: each page has its own toolbar, so neither half is more active. */
 .vtab-list .tab-split.on-screen {
-  background: color-mix(in srgb, var(--bg-input) 55%, transparent);
-  box-shadow:
-    inset 0 0 0 1px var(--border),
-    var(--shadow-sm);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm);
 }
 
-/* The half you're using still stands out, without a shadow cutting across the row. */
-.vtab-list .tab-split > .tab.active {
-  box-shadow: none;
-}
-
-.vtab-list .tab-split > .tab.on-screen {
+.vtab-list .tab-split.on-screen > .tab {
   background: none;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.vtab-list .tab-split.on-screen > .tab:hover {
+  background: var(--bg-hover);
 }
 
 /* In the tab strip: one tab twice as wide, with square corners where the halves meet. */
@@ -3646,8 +3685,8 @@ html.resizing-vtabs * {
   background: var(--bg-raised);
 }
 
-.tabs .tab-split.on-screen > .tab:not(.active) {
-  color: var(--text-muted);
+.tabs .tab-split.on-screen > .tab {
+  color: var(--text);
 }
 
 .vtab-list .tab::before {
@@ -3664,7 +3703,8 @@ html.resizing-vtabs * {
   -webkit-app-region: no-drag;
 }
 
-:root:not([data-platform='darwin']) .layout-vertical .toolbar {
+:root:not([data-platform='darwin']) .layout-vertical .toolbar:not(.split),
+:root:not([data-platform='darwin']) .layout-vertical .toolbar-pane.right {
   padding-right: 146px;
 }
 
@@ -3808,7 +3848,8 @@ html.resizing-vtabs * {
  * Only themes that follow the page's color (`.follows-page`, see ThemeInfo) get the page's colors and the tints; in
  * the others `--page` is the theme's own toolbar color.
  */
-.chrome .chrome-header {
+.chrome .chrome-header,
+.chrome .toolbar-pane {
   --page: var(--bg-raised);
   --page-fg: oklch(from var(--page) clamp(0, (0.68 - l) * 1000, 1) 0 0);
   --page-lift: oklch(from var(--page) min(1, l + 0.07) c h);
@@ -3816,6 +3857,7 @@ html.resizing-vtabs * {
 }
 
 .chrome.follows-page .toolbar,
+.chrome.follows-page .toolbar-pane,
 .chrome.follows-page .findbar {
   --text: var(--page-fg);
   --text-muted: color-mix(in srgb, var(--page-fg) 68%, var(--page));
@@ -3827,6 +3869,7 @@ html.resizing-vtabs * {
 }
 
 .chrome .toolbar,
+.chrome .toolbar-pane,
 .chrome .findbar {
   /* The edge spans only the page; above an open sidebar it's the main color. */
   background: var(--page-edge, none) 0 0 / var(--page-edge-width, 100%) 100% no-repeat var(--page);
@@ -3885,15 +3928,53 @@ html.resizing-vtabs * {
  * wide in a full-screen window and narrows gently as the window does (about 330px at 1360px wide), shrinking
  * further only when there's no room left.
  */
-.chrome .toolbar::before,
-.chrome .toolbar::after {
+.chrome .toolbar:not(.split)::before,
+.chrome .toolbar:not(.split)::after,
+.chrome .toolbar-pane::before,
+.chrome .toolbar-pane::after {
   content: '';
   flex: 1 1 0;
   order: 1;
 }
 
-.chrome .toolbar::after {
+.chrome .toolbar:not(.split)::after,
+.chrome .toolbar-pane::after {
   order: 3;
+}
+
+/*
+ * In a split view each page has its own toolbar, in its colors, above it and as wide: the gap between the pages
+ * runs up between them. The window's buttons are at the end of the right one.
+ */
+.chrome .toolbar.split {
+  gap: 0;
+  padding: 0;
+  background: var(--bg-raised);
+}
+
+.chrome .toolbar-pane {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px;
+  overflow: hidden;
+}
+
+.chrome .toolbar-pane.left {
+  flex: none;
+  width: var(--split-left);
+  /* SPLIT_PAD, the gap between the pages. */
+  margin-right: 6px;
+}
+
+.chrome .toolbar-pane.right {
+  flex: 1;
+}
+
+.chrome .toolbar-pane .omnibox {
+  min-width: 90px;
 }
 
 .chrome .omnibox ~ * {

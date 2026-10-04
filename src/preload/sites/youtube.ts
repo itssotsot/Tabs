@@ -1,6 +1,7 @@
 // The filter lists take YouTube's ads out of what its player loads (see src/preload/adblock.ts). This is
 // for what gets through anyway: ad slots they don't hide yet, an ad that starts playing, and the
-// "ad blockers aren't allowed" dialog.
+// "ad blockers aren't allowed" dialog over a video that still plays. When YouTube refuses to play the video
+// at all, it says so in the player (#error-screen): that stays, or the player just sits there blank.
 import { oncePerFrame } from '../frame'
 import type { PageSite } from './index'
 
@@ -11,7 +12,7 @@ const AD_STYLES = `
   ytd-companion-slot-renderer, ytd-action-companion-ad-renderer, ytd-player-legacy-desktop-watch-ads-renderer,
   ytd-rich-item-renderer:has(> #content > ytd-ad-slot-renderer), ytd-reel-video-renderer:has(ytd-ad-slot-renderer),
   .ytp-ad-overlay-container, .ytp-ad-image-overlay, .ytp-suggested-action-badge,
-  tp-yt-paper-dialog:has(ytd-enforcement-message-view-model), ytd-enforcement-message-view-model
+  tp-yt-paper-dialog:has(ytd-enforcement-message-view-model)
   { display: none !important; }
 `
 
@@ -41,7 +42,7 @@ function skipAds(): void {
     }
 
     // If the "ad blockers aren't allowed" dialog paused the video, dismiss it and resume.
-    const dialog = document.querySelector('ytd-enforcement-message-view-model')
+    const dialog = document.querySelector('tp-yt-paper-dialog ytd-enforcement-message-view-model')
     if (dialog) {
       dialog.closest('tp-yt-paper-dialog')?.remove()
       document.querySelector('tp-yt-iron-overlay-backdrop')?.remove()

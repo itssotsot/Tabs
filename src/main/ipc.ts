@@ -199,7 +199,7 @@ export function registerIpc(): void {
     c.createTab(isString(url) ? toNavigableUrl(url, store.settings.searchEngine) : undefined)
   })
   onChrome(IPC.tabClose, (c, id) => isNumber(id) && c.closeById(id))
-  onChrome(IPC.tabActivate, (c, id) => isNumber(id) && c.activateById(id))
+  onChrome(IPC.tabActivate, (c, id, focusPage) => isNumber(id) && c.activateById(id, focusPage !== false))
   onChrome(IPC.tabMove, (c, id, to, into) => {
     if (isNumber(id) && isNumber(to)) c.dragTab(id, to, isString(into) || into === null ? into : undefined)
   })
@@ -231,6 +231,9 @@ export function registerIpc(): void {
   onChrome(IPC.splitResize, (c, ratio) => isNumber(ratio) && c.resizeSplit(ratio))
   onChrome(IPC.splitClose, (c) => c.closeSplit())
   onChrome(IPC.splitSwap, (c) => c.swapSplit())
+  onChrome(IPC.splitPair, (c, id, target, side) => {
+    if (isNumber(id) && isNumber(target) && (side === 'left' || side === 'right')) c.splitWith(id, target, side)
+  })
   onChrome(IPC.navigate, (c, input) => {
     if (!isString(input) || enterOmniboxInput(input.trim(), 'currentTab')) return
     c.navigate(toNavigableUrl(input, store.settings.searchEngine))
@@ -282,11 +285,12 @@ export function registerIpc(): void {
       size(a.top) &&
       size(a.before) &&
       size(a.after) &&
+      size(a.width) &&
       color(a.background) &&
       color(a.foreground)
     ) {
-      const { chromeClass, left, top, before, after, background, foreground } = a
-      c.setOmniboxAnchor({ chromeClass, left, top, before, after, background, foreground })
+      const { chromeClass, left, top, before, after, width, background, foreground } = a
+      c.setOmniboxAnchor({ chromeClass, left, top, before, after, width, background, foreground })
     }
   })
   onChrome(IPC.omniboxHide, (c) => {
