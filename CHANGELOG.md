@@ -6,6 +6,10 @@ Written for friends, not developers. One "## <version>" section per release, new
 `npm run release` refuses to release a version without a section, and posts it as the GitHub release notes.
 -->
 
+## 0.0.3
+
+- On Windows, videos no longer flicker.
+
 ## 0.0.2
 
 - **Split view: two tabs side by side.** Right-click a tab and choose **Open in Split View**, or drag a tab to one side of the page. The split button in the toolbar swaps the sides or closes it.
